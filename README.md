@@ -170,7 +170,7 @@ class Conditioner(torch.nn.Module):
  Roughly speaking, `Conditioner`s are composable by construction because their input and output type signatures are matched (i.e. they are an endomorphism). So we also simply build conditioners from conditioners by "stacking" them much as we would with traditional neural network layer developemnt. With the final `Conditioner` as an input, `Chroma.sample()` will then leverage Pytorch's automatic differentiation facilities to automaticallly furnish a diffusion-annealed MCMC sampling algorithm to sample with this conditioner (We note this isn't magic and taking care to scale and parameterize appropriately is [important](#note-on-conditioners)).
 
 ##### A minimal Conditioner: 2D lattice symmetry
-The code snippet below shows how in a few lines of code we can add a conditioner that stipulates the generation of a 2D crystal-like object, where generated proteins are arrayed in an `M x N` rectangulare lattice.
+The code snippet below shows how in a few lines of code we can add a conditioner that stipulates the generation of a 2D crystal-like object, where generated proteins are arrayed in an `M x N` rectangular lattice.
 
 ```python
 import torch
