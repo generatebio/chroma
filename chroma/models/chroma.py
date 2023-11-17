@@ -86,7 +86,10 @@ class Chroma(nn.Module):
         ).eval()
 
         self.design_network = graph_design.load_model(
-            weights_design, device=device, strict=strict, verbose=False,
+            weights_design,
+            device=device,
+            strict=strict,
+            verbose=False,
         ).eval()
 
     def sample(
@@ -169,14 +172,14 @@ class Chroma(nn.Module):
                     Can be `potts` and `autoregressive`. Default is `potts`.
                 design_selection (str, optional): Clamp selection for
                     conditioning on a subsequence during sequence sampling. Can be
-                    either a selection string or a binary design mask indicating
-                    positions to be sampled with shape `(num_batch, num_residues)` or
-                    position-specific valid amino acid choices with shape
+                    either a PyMOl-like selection string
+                    or a binary design mask indicating positions with shape `(num_batch,
+                    num_residues)`. 1. indicating the residue to be designed and
+                    0. indicates the residue will be masked.
+                    e.g.
+                        design_selection = torch.Tensor([[0., 1. ,1., 0., 1. ... ]])
+                    or position-specific valid amino acid choices with shape
                     `(num_batch, num_residues, num_alphabet)`.
-                design_mask_sample (Tensor, optional): Binary design mask indicating
-                    which positions can be sampled with shape `(num_batch, num_residues)`.
-                    or which amino acids can be sampled at which position with
-                    shape `(num_batch, num_residues, num_alphabet)`.
                 design_t (float or torch.Tensor, optional): Diffusion time for models
                     trained with diffusion augmentation of input structures. Setting `t=0`
                     or `t=None` will condition the model to treat the structure as
@@ -645,7 +648,9 @@ class Chroma(nn.Module):
         return metric_dictionary
 
     def score_sequence(
-        self, proteins: Union[List[Protein], Protein], t: Optional[torch.Tensor] = None,
+        self,
+        proteins: Union[List[Protein], Protein],
+        t: Optional[torch.Tensor] = None,
     ) -> dict:
         """
         Scores designed Proteins with the following Chroma scores:
