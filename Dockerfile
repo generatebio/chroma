@@ -17,6 +17,7 @@ RUN curl -o ~/miniconda.sh https://repo.anaconda.com/miniconda/Miniconda3-latest
      ~/miniconda.sh -b -p /opt/conda && \
      rm ~/miniconda.sh
 RUN /opt/conda/bin/conda create --name chroma python=3.9.7
+RUN /opt/conda/envs/chroma/bin/pip install torch==1.12.1+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
 WORKDIR /workspace
 COPY . .
 RUN /opt/conda/envs/chroma/bin/pip install .
