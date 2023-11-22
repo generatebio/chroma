@@ -172,13 +172,16 @@ class Chroma(nn.Module):
                     Can be `potts` and `autoregressive`. Default is `potts`.
                 design_selection (str, optional): Clamp selection for
                     conditioning on a subsequence during sequence sampling. Can be
-                    either a PyMOl-like selection string
-                    or a binary design mask indicating positions with shape `(num_batch,
+                    1) a PyMOl-like selection string
+                        (https://pymolwiki.org/index.php/Property_Selectors)
+                    or
+                    2) a binary design mask indicating positions with shape `(num_batch,
                     num_residues)`. 1. indicating the residue to be designed and
                     0. indicates the residue will be masked.
                     e.g.
                         design_selection = torch.Tensor([[0., 1. ,1., 0., 1. ... ]])
-                    or position-specific valid amino acid choices with shape
+                    or
+                    3) position-specific valid amino acid choices with shape
                     `(num_batch, num_residues, num_alphabet)`.
                 design_t (float or torch.Tensor, optional): Diffusion time for models
                     trained with diffusion augmentation of input structures. Setting `t=0`
