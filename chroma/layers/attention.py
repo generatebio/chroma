@@ -64,11 +64,11 @@ class MultiHeadAttention(nn.Module):
     for details and intuition.
 
      Args:
-         n_head (int): number of attention heads
-         d_k (int): dimension of the keys and queries in each attention head
-         d_v (int): dimension of the values in each attention head
-         d_model (int): input and output dimension for the layer
-         dropout (float): dropout rate, default is 0.1
+        n_head (int): number of attention heads
+        d_k (int): dimension of the keys and queries in each attention head
+        d_v (int): dimension of the values in each attention head
+        d_model (int): input and output dimension for the layer
+        dropout (float): dropout rate, default is 0.1
 
     Inputs:
         Q (torch.tensor): query tensor of shape ```(batch_size, sequence_length_q, d_model)```
