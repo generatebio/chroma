@@ -355,6 +355,9 @@ class Chroma(nn.Module):
 
         if protein_init is not None:
             X_unc, C_unc, S_unc = protein_init.to_XCS()
+            X_unc = X_unc.repeat(samples, 1, 1, 1)
+            C_unc = C_unc.repeat(samples, 1)
+            S_unc = S_unc.repeat(samples, 1)
         else:
             X_unc, C_unc, S_unc = self._init_backbones(samples, chain_lengths)
 
