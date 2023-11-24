@@ -20,7 +20,7 @@ import re
 import warnings
 from dataclasses import dataclass
 from functools import partial
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import torch
