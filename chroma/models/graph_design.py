@@ -1954,8 +1954,12 @@ class NodePredictorS(nn.Module):
                 smoothing values less than 1.0 are recommended.
             top_p (float, optional): Top-p cutoff for Nucleus Sampling, see
                 Holtzman et al ICLR 2020.
-            ban_S (tuple, optional): An optional set of token indices from
-                `chroma.constants.AA20` to ban during sampling.
+            mask_S (torch.Tensor, optional): Binary tensor mask indicating 
+                masked/banned tokens during sampling at each residue with shape
+                `(num_batch, num_residues, num_alphabet)`.
+            bias (torch.Tensor, optional): Bias for each token for at 
+                each residue added to log probabilities with shape 
+                `(num_batch, num_residues, num_alphabet)`.
 
         Returns:
             S_sample (torch.LongTensor): Sampled sequence of shape `(num_batch,
