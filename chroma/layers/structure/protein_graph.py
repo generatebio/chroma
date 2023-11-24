@@ -101,7 +101,7 @@ class ProteinFeatureGraph(nn.Module):
             for the the third dimension are PDB order (`[N, CA, C, O]`).
         C (LongTensor, optional): Chain map with shape
             `(num_batch, num_residues)`. The chain map codes positions as `0`
-            when masked, poitive integers for chain indices, and negative
+            when masked, positive integers for chain indices, and negative
             integers to represent missing residues of the corresponding
             positive integers.
         custom_D (Tensor, optional): Pre-computed custom distance map
