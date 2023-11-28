@@ -23,6 +23,7 @@ natively in pytorch.
 
 import json
 import os
+import tempfile
 from typing import Optional, Tuple
 
 import numpy as np
@@ -244,12 +245,12 @@ class ProteinFeatureGraph(nn.Module):
         return node_h, edge_h, edge_idx, mask_i, mask_ij
 
     def _load_centering_params(self, reference_pdb: str):
-        basepath = os.path.dirname(os.path.abspath(__file__)) + "/params/"
+        basepath = os.path.join(tempfile.gettempdir(), "generate", "params")
         if not os.path.exists(basepath):
             os.makedirs(basepath)
 
         filename = f"centering_{reference_pdb}.params"
-        self.centering_file = basepath + filename
+        self.centering_file = os.path.join(basepath, filename)
         key = (
             reference_pdb
             + ";"
@@ -310,7 +311,7 @@ class ProteinFeatureGraph(nn.Module):
             std = std.view(-1)
 
             if verbose:
-                frac = (100.0 * std ** 2 / (mean ** 2 + std ** 2)).type(torch.int32)
+                frac = (100.0 * std**2 / (mean**2 + std**2)).type(torch.int32)
                 print(f"Fraction of raw variance: {frac}")
             return mean, std
 
@@ -1032,7 +1033,7 @@ class EdgeOrientation2mer(nn.Module):
 
     def _normed_vec(self, V):
         # Unit vector from i to j
-        mag_sq = (V ** 2).sum(dim=-1, keepdim=True)
+        mag_sq = (V**2).sum(dim=-1, keepdim=True)
         mag = torch.sqrt(mag_sq + self.distance_eps)
         V_norm = V / mag
         return V_norm
@@ -1118,7 +1119,7 @@ class EdgeOrientationChain(nn.Module):
 
     def _normed_vec(self, V):
         # Unit vector from i to j
-        mag_sq = (V ** 2).sum(dim=-1, keepdim=True)
+        mag_sq = (V**2).sum(dim=-1, keepdim=True)
         mag = torch.sqrt(mag_sq + self.norm_eps)
         V_norm = V / mag
         return V_norm
@@ -1183,7 +1184,7 @@ class EdgeOrientationChain(nn.Module):
     def _transformation_features(self, X_i, X_j, R_i, R_j, edge_idx, edges=True):
         # Distance and direction
         dX = X_j - X_i.unsqueeze(2).contiguous()
-        L = torch.sqrt((dX ** 2).sum(-1, keepdim=True) + self.distance_eps)
+        L = torch.sqrt((dX**2).sum(-1, keepdim=True) + self.distance_eps)
         u_ij = torch.einsum("niab,nija->nijb", R_i, dX / L)
 
         # Relative orientation
@@ -1473,7 +1474,7 @@ class NodeCartesianCoords(nn.Module):
         self.num_atom_types = num_atom_types
 
         # Public attribute
-        self.dim_out = 3 * (num_atom_types ** 2)
+        self.dim_out = 3 * (num_atom_types**2)
 
     def forward(
         self,
@@ -1524,7 +1525,7 @@ class EdgeCartesianCoords(nn.Module):
         self.num_atom_types = num_atom_types
 
         # Public attribute
-        self.dim_out = 3 * (num_atom_types ** 2)
+        self.dim_out = 3 * (num_atom_types**2)
 
     def forward(
         self,

@@ -15,6 +15,7 @@
 from __future__ import annotations
 
 import copy
+import os
 import tempfile
 from typing import List, Optional, Tuple, Union
 
@@ -230,7 +231,7 @@ class Protein:
 
         from chroma.utility.fetchdb import RCSB_file_download
 
-        file_cif = f"/tmp/{pdb_id}.cif"
+        file_cif = os.path.join(tempfile.gettempdir(), f"{pdb_id}.cif")
         RCSB_file_download(pdb_id, ".cif", file_cif)
         protein = cls.from_CIF(file_cif, canonicalize=canonicalize, device=device)
         unlink(file_cif)
@@ -336,7 +337,8 @@ class Protein:
         return X, C, S
 
     def to_XCS_trajectory(
-        self, device: Optional[str] = None,
+        self,
+        device: Optional[str] = None,
     ) -> Tuple[List[torch.Tensor], torch.Tensor, torch.Tensor]:
         """
         Convert the current Protein object to its XCS tensor representations over a trajectory.
@@ -416,7 +418,9 @@ class Protein:
         This method processes the protein to ensure it conforms to a canonical form.
         """
         self.sys.canonicalize_protein(
-            level=2, drop_coors_unknowns=True, drop_coors_missing_backbone=True,
+            level=2,
+            drop_coors_unknowns=True,
+            drop_coors_missing_backbone=True,
         )
 
     def sequence(self, format: str = "one-letter-string") -> Union[List[str], str]:

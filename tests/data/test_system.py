@@ -1,5 +1,6 @@
 import copy
 import filecmp
+import os
 import random
 import tempfile
 import time
@@ -167,7 +168,7 @@ def test_invalid_input(cif_file):
 
 
 def next_structure_file(num=100, cif=True):
-    tmp_file = "/tmp/_pdb_list.txt"
+    tmp_file = os.path.join(tempfile.gettempdir(), "_pdb_list.txt")
     download_file(
         "https://files.wwpdb.org/pub/pdb/derived_data/pdb_entry_type.txt", tmp_file
     )
@@ -176,16 +177,16 @@ def next_structure_file(num=100, cif=True):
     random.shuffle(pdb_ids)
 
     if cif:
-        file = "/tmp/_pdb_download.cif"
+        file = os.path.join(tempfile.gettempdir(), "_pdb_download.cif")
     else:
-        file = "/tmp/_pdb_download.pdb"
+        file = os.path.join(tempfile.gettempdir(), "_pdb_download.pdb")
     for pdb_id in pdb_ids[:num]:
         # download CIF file
         if cif:
-            file = "/tmp/_pdb_download.cif"
+            file = os.path.join(tempfile.gettempdir(), "_pdb_download.cif")
             download_file(f"https://files.rcsb.org/download/{pdb_id}.cif", file)
         else:
-            file = "/tmp/_pdb_download.pdb"
+            file = os.path.join(tempfile.gettempdir(), "_pdb_download.pdb")
             download_file(f"https://files.rcsb.org/download/{pdb_id}.pdb", file)
         yield pdb_id, file
 
