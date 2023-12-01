@@ -895,6 +895,9 @@ class SubstructureConditioner(Conditioner):
         self.register_buffer("C", C)
         self.register_buffer("S", S)
         self.register_buffer("D", D)
+        print(
+            "Note: We recommend using sde_func='langevin' for sampling with SubstructureCondtioner"
+        )
 
     def _transform_gradient(self, grad, C, t):
         mask = (t > self.tspan[0]) & (t < self.tspan[1])
@@ -1023,6 +1026,10 @@ class SymmetryConditioner(Conditioner):
             self.num_chain_neighbors = self.G.shape[0] - 1
 
         self.potts_symmetry_order = self.num_chain_neighbors + 1
+
+        print(
+            "Note: We recommend using sde_func='langevin' for sampling with SymmetryConditioner"
+        )
 
     def flat_bottom_potential(self, r, r0, k, d):
         condition = torch.abs(r - r0) < d
