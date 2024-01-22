@@ -28,7 +28,7 @@ The tensors in an XCS representation are:
 
     `C` (LongTensor), the chain map encoding per-residue chain assignments with
         shape `(num_batch, num_residues)`.The chain map codes positions as `0`
-        when masked, poitive integers for chain indices, and negative integers
+        when masked, positive integers for chain indices, and negative integers
         to represent missing residues (of the corresponding positive integers).
 
     `S` (LongTensor), the sequence of the protein as alphabet indices with
