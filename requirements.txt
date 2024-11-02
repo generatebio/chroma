@@ -8,4 +8,4 @@ scikit_learn==1.1.2
 scipy
 torch
 tqdm
-transformers==4.24.0
+transformers>=4.24.0
