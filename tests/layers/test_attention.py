@@ -51,8 +51,11 @@ def test_multi_head_attention_matches_legacy_path():
     )
     actual_output, actual_attns = module(Q, K, V, mask=mask)
 
-    assert torch.allclose(actual_output, expected_output)
-    assert torch.allclose(actual_attns, expected_attns)
+    # Batched einsum projection vs. the legacy per-head loop are only
+    # equivalent up to floating-point reduction order, which differs across
+    # BLAS backends, so use a looser-than-default tolerance.
+    assert torch.allclose(actual_output, expected_output, rtol=1e-4, atol=1e-5)
+    assert torch.allclose(actual_attns, expected_attns, rtol=1e-4, atol=1e-5)
 
 
 def test_attention_chain_pool_matches_legacy_path():

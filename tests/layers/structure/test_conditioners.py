@@ -138,6 +138,8 @@ def test_sampling(gaussian_noise, conditioner, request):
     )
 
 
+@pytest.mark.integration
+@pytest.mark.slow
 def test_proclass_conditioner(protein):
     """Smoke test for secondary structure conditioning"""
     SECONDARY_STRUCTURE = "CCEEEEEEEETTTTECTTTTTTTTCCCHHHHHHHHHHHHCCCTTTTEEEEEECHHHHHHCTGGTTTTTTTEEEEETTTTTTTTTTTCEEECTHHHHHHHHHCHGHGGHCCEEEEEECHHHHHHHHHCTCEEEEEEEEETTCCCTTEECCCCTGGGTEEETETTTTTCCEEEETTEEEEEEEEEEEC"
