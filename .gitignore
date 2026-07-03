@@ -8,6 +8,7 @@
 *.tsv
 *.pdb
 *.cif
+!tests/resources/*.cif
 *.pk
 *.pt
 *.fasta
