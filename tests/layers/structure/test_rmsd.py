@@ -11,6 +11,7 @@ from chroma.layers.structure.rmsd import (
     LossFragmentRMSD,
     LossNeighborhoodRMSD,
 )
+from tests.helpers import cif_path
 
 
 @pytest.fixture
@@ -141,7 +142,7 @@ def test_backbone_rmsd(backbones):
     for method in ["symeig", "power"]:
         backbone_rmsd = BackboneRMSD(method=method)
 
-        X, C, S = Protein("5imm").to_XCS()
+        X, C, S = Protein(cif_path("5imm")).to_XCS()
 
         rigid_transformer = RigidTransformer()
         dX = torch.Tensor([[1, 4, 2]])
@@ -157,7 +158,7 @@ def test_backbone_rmsd(backbones):
 
 
 def test_fragment_rmsd(debug=False):
-    X, C, S = Protein("1SHG").to_XCS()
+    X, C, S = Protein(cif_path("1shg")).to_XCS()
 
     loss_frags = LossFragmentRMSD()
 
@@ -206,7 +207,7 @@ def test_fragment_rmsd(debug=False):
 
 
 def test_fragment_pair_rmsd(debug=False):
-    X, C, S = Protein("1SHG").to_XCS()
+    X, C, S = Protein(cif_path("1shg")).to_XCS()
 
     loss_pairs = LossFragmentPairRMSD()
 
@@ -257,7 +258,7 @@ def test_fragment_pair_rmsd(debug=False):
 
 
 def test_neighborhood_rmsd(debug=False):
-    X, C, S = Protein("1SHG").to_XCS()
+    X, C, S = Protein(cif_path("1shg")).to_XCS()
 
     loss_nb = LossNeighborhoodRMSD()
 

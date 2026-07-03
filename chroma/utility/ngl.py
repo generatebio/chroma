@@ -21,41 +21,58 @@ datatypes, such as `mst.System` and `XCS` tensors, with nglview.
 
 import tempfile
 import uuid
+from functools import lru_cache
 
-import nglview as nv
+
+def _load_nglview():
+    try:
+        import nglview as nv
+    except Exception as exc:
+        raise ImportError(
+            "Protein display requires a working `nglview` installation."
+        ) from exc
+    return nv
 
 
-class SystemTrajectory(nv.base_adaptor.Trajectory, nv.base_adaptor.Structure):
-    """MST multi-state System object adaptor, by analogy to other NGLView adaptor
-      classes (e.g., MDTrajTrajectory or PyTrajTrajectory in nglview.adaptor).
-    Example
-    -------
-    >>> import nglview as nv
-    >>> import chroma.data.protein import Protein
-    >>> protein_trajectory = Protein("multi-state.cif")
-    >>> t = SystemTrajectory(protein_trajectory.sys)
-    >>> w = nv.NGLWidget(t)
-    >>> w
-    """
+def has_nglview() -> bool:
+    try:
+        _load_nglview()
+    except ImportError:
+        return False
+    return True
 
-    def __init__(self, protein):
-        self.protein = protein
-        self.ext = "pdb"
-        self.params = {}
-        self.id = str(uuid.uuid4())
 
-    def get_coordinates(self, index):
-        self.protein.sys.swap_model(index)
-        X, _, _ = self.protein.sys.to_XCS()
-        self.protein.sys.swap_model(index)
-        return X.view(-1, 3).numpy()
+@lru_cache(maxsize=1)
+def _system_trajectory_type():
+    nv = _load_nglview()
 
-    @property
-    def n_frames(self):
-        return self.protein.sys.num_models()
+    class _SystemTrajectory(nv.base_adaptor.Trajectory, nv.base_adaptor.Structure):
+        """NGLView adaptor for multi-model `Protein` objects."""
 
-    def get_structure_string(self):
-        return self.protein.sys.to_PDB_string()
+        def __init__(self, protein):
+            self.protein = protein
+            self.ext = "pdb"
+            self.params = {}
+            self.id = str(uuid.uuid4())
+
+        def get_coordinates(self, index):
+            self.protein.sys.swap_model(index)
+            X, _, _ = self.protein.sys.to_XCS()
+            self.protein.sys.swap_model(index)
+            return X.view(-1, 3).numpy()
+
+        @property
+        def n_frames(self):
+            return self.protein.sys.num_models()
+
+        def get_structure_string(self):
+            return self.protein.sys.to_PDB_string()
+
+    return _SystemTrajectory
+
+
+def SystemTrajectory(protein):
+    return _system_trajectory_type()(protein)
 
 
 def view_gsystem(system, **kwargs):
@@ -69,6 +86,7 @@ def view_gsystem(system, **kwargs):
             returning this to the notebook will trigger display of a
             widget.
     """
+    nv = _load_nglview()
     temp = tempfile.NamedTemporaryFile(suffix=".pdb")
     filename = temp.name
     system.to_PDB(filename)
@@ -79,3 +97,17 @@ def view_gsystem(system, **kwargs):
     view.add_representation("contact")
     view.center()
     return view
+
+
+def view_protein(protein, representations=None):
+    nv = _load_nglview()
+    representations = representations or []
+
+    if protein.sys.num_models() == 1:
+        viewer = view_gsystem(protein.sys)
+    else:
+        viewer = nv.NGLWidget(SystemTrajectory(protein))
+
+    for representation in representations:
+        viewer.add_representation(representation)
+    return viewer

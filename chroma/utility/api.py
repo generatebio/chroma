@@ -16,12 +16,25 @@ import hashlib
 import json
 import os
 import tempfile
+from urllib.parse import urlparse
 
 import requests
 
 import chroma
 
 ROOT_DIR = os.path.dirname(os.path.dirname(chroma.__file__))
+
+# Hosts the registered access token is allowed to be sent to. Weight paths are
+# often passed as free-form strings (e.g. via model constructor arguments), so
+# this prevents the token from being exfiltrated to an arbitrary URL.
+ALLOWED_TOKEN_HOSTS = {"chroma-weights.generatebiomedicines.com"}
+
+
+def download_cache_path(base_url: str, weights_name: str) -> str:
+    """Return the local cache path for a named weight download."""
+    url_hash = hashlib.md5((base_url + weights_name).encode()).hexdigest()
+    temp_dir = os.path.join(tempfile.gettempdir(), "chroma_weights", url_hash)
+    return os.path.join(temp_dir, "weights.pt")
 
 
 def register_key(key: str, key_directory=ROOT_DIR) -> None:
@@ -36,7 +49,8 @@ def register_key(key: str, key_directory=ROOT_DIR) -> None:
         None
     """
     config_path = os.path.join(key_directory, "config.json")
-    with open(config_path, "w") as f:
+    fd = os.open(config_path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump({"access_token": key}, f)
 
 
@@ -90,10 +104,16 @@ def download_from_generate(
         str: Path to the downloaded (or cached) file.
     """
 
-    # Create a hash of the URL + weight name to determine the path for the cached/temporary file
-    url_hash = hashlib.md5((base_url + weights_name).encode()).hexdigest()
-    temp_dir = os.path.join(tempfile.gettempdir(), "chroma_weights", url_hash)
-    destination = os.path.join(temp_dir, "weights.pt")
+    host = urlparse(base_url).netloc
+    if host not in ALLOWED_TOKEN_HOSTS:
+        raise ValueError(
+            f"Refusing to send the registered access token to '{host}': only"
+            f" {sorted(ALLOWED_TOKEN_HOSTS)} are allowed. Check that the weights"
+            " path/URL is correct."
+        )
+
+    destination = download_cache_path(base_url, weights_name)
+    temp_dir = os.path.dirname(destination)
 
     # Ensure the directory exists
     os.makedirs(temp_dir, exist_ok=True)
@@ -114,11 +134,21 @@ def download_from_generate(
     params = {"token": read_key(key_directory), "weights": weights_name}
 
     # Perform the GET request with the token as a query parameter
-    response = requests.get(base_url, params=params)
+    response = requests.get(base_url, params=params, stream=True, timeout=60)
     response.raise_for_status()  # Raise an error for HTTP errors
 
-    with open(destination, "wb") as file:
-        file.write(response.content)
+    # Stream to a per-process temp file and atomically rename it into place so
+    # a killed/interrupted download never leaves a truncated file at the
+    # canonical cache path for a future call to trust.
+    fd, tmp_destination = tempfile.mkstemp(dir=temp_dir)
+    try:
+        with os.fdopen(fd, "wb") as file:
+            for chunk in response.iter_content(chunk_size=1024 * 1024):
+                file.write(chunk)
+        os.replace(tmp_destination, destination)
+    except BaseException:
+        os.remove(tmp_destination)
+        raise
 
     print(f"Data saved to {destination}")
     return destination

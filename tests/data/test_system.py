@@ -1,35 +1,51 @@
 import copy
-import filecmp
 import os
-import random
 import tempfile
-import time
 from pathlib import Path
-from unittest import TestCase
 
 import numpy as np
-import pandas
 import pytest
-import requests
 
 import chroma
 from chroma.data.system import System
+from chroma.data.system_support import NameList, StringList, SystemAssemblyInfo
+
+pytestmark = pytest.mark.slow
 
 BASE_PATH = str(Path(chroma.__file__).parent.parent)
 CIF_TRAJECTORY = BASE_PATH + "/tests/resources/chroma_trajectory.cif"
+LOCAL_CIF_FILES = sorted(
+    str(path)
+    for path in Path(BASE_PATH, "tests", "resources").glob("*.cif")
+    if path.name != "chroma_trajectory.cif"
+)
+
+
+def test_system_support_defaults_are_not_shared():
+    assembly_a = SystemAssemblyInfo()
+    assembly_b = SystemAssemblyInfo()
+    assembly_a.assemblies["A"] = {"details": "test"}
+    assembly_a.operations["1"] = {"type": "identity"}
+    assert assembly_b.assemblies == {}
+    assert assembly_b.operations == {}
+
+    strings_a = StringList()
+    strings_b = StringList()
+    strings_a.append("ABC")
+    assert len(strings_b) == 0
+
+    names_a = NameList()
+    names_b = NameList()
+    names_a.append("foo")
+    assert len(names_b) == 0
 
 
 @pytest.fixture
 def cif_file():
-    file = str(
-        Path(Path(chroma.__file__).parent.parent, "tests", "resources", "7bz5.cif")
-    )
+    file = str(Path(BASE_PATH, "tests", "resources", "7bz5.cif"))
+    if not os.path.exists(file):
+        pytest.skip("requires tests/resources/7bz5.cif")
     return file
-
-
-def download_file(url, destination_file):
-    r = requests.get(url, allow_redirects=True)
-    open(destination_file, "wb").write(r.content)
 
 
 def test_7bz5_selection(cif_file):
@@ -168,27 +184,24 @@ def test_invalid_input(cif_file):
 
 
 def next_structure_file(num=100, cif=True):
-    tmp_file = os.path.join(tempfile.gettempdir(), "_pdb_list.txt")
-    download_file(
-        "https://files.wwpdb.org/pub/pdb/derived_data/pdb_entry_type.txt", tmp_file
-    )
-    D = pandas.read_csv(tmp_file, sep="\t", header=None)
-    pdb_ids = list(D[0])
-    random.shuffle(pdb_ids)
-
+    selected_files = LOCAL_CIF_FILES[:num]
     if cif:
-        file = os.path.join(tempfile.gettempdir(), "_pdb_download.cif")
-    else:
-        file = os.path.join(tempfile.gettempdir(), "_pdb_download.pdb")
-    for pdb_id in pdb_ids[:num]:
-        # download CIF file
-        if cif:
-            file = os.path.join(tempfile.gettempdir(), "_pdb_download.cif")
-            download_file(f"https://files.rcsb.org/download/{pdb_id}.cif", file)
-        else:
-            file = os.path.join(tempfile.gettempdir(), "_pdb_download.pdb")
-            download_file(f"https://files.rcsb.org/download/{pdb_id}.pdb", file)
-        yield pdb_id, file
+        for file in selected_files:
+            yield Path(file).stem, file
+        return
+
+    temp_files = []
+    try:
+        for cif_file in selected_files:
+            with tempfile.NamedTemporaryFile(suffix=".pdb", delete=False) as tmp_file:
+                pdb_file = tmp_file.name
+            System.from_CIF(cif_file).to_PDB(pdb_file)
+            temp_files.append(pdb_file)
+            yield Path(cif_file).stem, pdb_file
+    finally:
+        for pdb_file in temp_files:
+            if os.path.exists(pdb_file):
+                os.remove(pdb_file)
 
 
 def test_writing_pdb(cif_file):
@@ -203,8 +216,6 @@ def test_writing_pdb(cif_file):
 def test_reading_cif(cif_file):
     # smoke test for CIF reading
     for pdb_id, cif_file in next_structure_file(num=100, cif=True):
-        # load into python and MST in random order, record time
-        order = random.random()
         for i in range(2):
             sys = System.from_CIF(cif_file)
 
@@ -212,8 +223,6 @@ def test_reading_cif(cif_file):
 def test_reading_pdb(cif_file):
     # smoke test for PDB reading
     for pdb_id, pdb_file in next_structure_file(num=100, cif=False):
-        # load into python and MST in random order, record time
-        order = random.random()
         for i in range(2):
             sys = System.from_PDB(pdb_file)
 

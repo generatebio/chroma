@@ -12,7 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from types import SimpleNamespace
 from typing import List, Optional, Tuple, Union
 
 import torch
@@ -24,7 +23,12 @@ from chroma.layers.basic import FourierFeaturization
 from chroma.layers.structure import diffusion
 from chroma.models import graph_classifier
 from chroma.models.graph_classifier import GraphClassifier
-from chroma.models.graph_design import BackboneEncoderGNN
+from chroma.models.graph_design_components import BackboneEncoderGNN
+from chroma.models.model_configs import (
+    ProteinCaptionConfig,
+    build_model_config,
+    config_to_kwargs,
+)
 from chroma.utility.model import load_model as utility_load_model
 from chroma.utility.model import save_model as utility_save_model
 
@@ -161,13 +165,36 @@ class ProteinCaption(nn.Module):
     ) -> None:
         super().__init__()
 
-        # Save configuration in kwargs
-        self.kwargs = locals()
-        self.kwargs.pop("self")
-        for key in list(self.kwargs.keys()):
-            if key.startswith("__") and key.endswith("__"):
-                self.kwargs.pop(key)
-        args = SimpleNamespace(**self.kwargs)
+        self.config, self.extra_kwargs = build_model_config(
+            ProteinCaptionConfig,
+            {
+                "lm_id": lm_id,
+                "gnn_dim_edges": gnn_dim_edges,
+                "context_size": context_size,
+                "context_per_chain": context_per_chain,
+                "gnn_num_neighbors": gnn_num_neighbors,
+                "gnn_num_layers": gnn_num_layers,
+                "only_encode_caption_chain": only_encode_caption_chain,
+                "gnn_embed_ratio": gnn_embed_ratio,
+                "graph_criterion": graph_criterion,
+                "node_mlp_layers": node_mlp_layers,
+                "node_mlp_dim": node_mlp_dim,
+                "noise_schedule": noise_schedule,
+                "covariance_model": covariance_model,
+                "noise_complex_scaling": noise_complex_scaling,
+                "noiseless": noiseless,
+                "normalize_context_embeddings": normalize_context_embeddings,
+                "standardize_context_embeddings": standardize_context_embeddings,
+                "time_feature_type": time_feature_type,
+                "time_log_feature_scaling": time_log_feature_scaling,
+                "use_transformer": use_transformer,
+                "classifier_checkpoint": classifier_checkpoint,
+                "direct_gnn": direct_gnn,
+                "classifier_kwargs": classifier_kwargs,
+            },
+        )
+        self.kwargs = config_to_kwargs(self.config, self.extra_kwargs)
+        args = self.config
 
         try:
             import transformers
@@ -372,8 +399,11 @@ class ProteinCaption(nn.Module):
             Xe, _, _, Me, _ = self.protein_encoder.to(X.device)(X, C, node_h_aux=node_h)
         else:
             # TODO: is there a better way to deal with sequence padding tokens when batch size > 1?
-            if O is not None and O[:, :, -1].any():
-                O = None
+            if O is not None:
+                pad_token_present = O[:, :, -1].any(dim=1)
+                if pad_token_present.any():
+                    O = O.clone()
+                    O[pad_token_present] = 0
             Xe0, _, _, Me, _ = self.protein_encoder.to(X.device).encode(X, C, O, t)
             Xe = self.protein_encoder_linear.to(X.device)(Xe0)
 
@@ -617,7 +647,7 @@ class ProteinCaption(nn.Module):
                                 "Problem: tried to switch encodings at positions 0 and"
                                 f" {first_cid}, but failed!"
                             )
-                            # raise
+                            raise
 
             pooled_encoding.append(torch.cat(batch_encoding))
 

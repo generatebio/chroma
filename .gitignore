@@ -8,6 +8,7 @@
 *.tsv
 *.pdb
 *.cif
+!tests/resources/*.cif
 *.pk
 *.pt
 *.fasta
@@ -24,6 +25,8 @@ __mmtf__
 __pycache__
 public
 htmlcov
+build
+dist
 make.bat
 examples
 chroma/layers/structure/params/centering_2g3n.params
@@ -32,3 +35,4 @@ config.json
 
 # ides
 .vscode
+/personal/

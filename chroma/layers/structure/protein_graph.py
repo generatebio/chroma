@@ -24,6 +24,8 @@ natively in pytorch.
 import json
 import os
 import tempfile
+import warnings
+from importlib import resources
 from typing import Optional, Tuple
 
 import numpy as np
@@ -134,6 +136,9 @@ class ProteinFeatureGraph(nn.Module):
         edge_features: tuple = ("distances_6mer", "distances_chain"),
         centered: bool = True,
         centered_pdb: str = "2g3n",
+        centering_stats: Optional[dict] = None,
+        centering_file: Optional[str] = None,
+        strict_centering: bool = False,
     ):
         super(ProteinFeatureGraph, self).__init__()
 
@@ -179,8 +184,25 @@ class ProteinFeatureGraph(nn.Module):
         # Load feature centering params as buffers
         self.centered = centered
         self.centered_pdb = centered_pdb.lower()
+        self.strict_centering = strict_centering
+        self._initialize_centering_params()
         if self.centered:
-            self._load_centering_params(self.centered_pdb)
+            loaded = False
+            if centering_stats is not None:
+                self._set_centering_params(centering_stats)
+                loaded = True
+            else:
+                loaded = self.load_centering_params(
+                    reference_pdb=self.centered_pdb,
+                    centering_file=centering_file,
+                    allow_missing=True,
+                )
+            if self.strict_centering and not loaded:
+                raise FileNotFoundError(
+                    "Centering stats were requested but no local stats were found. "
+                    "Use `ProteinFeatureGraph.precompute_centering_params(...)` "
+                    "or pass `centering_stats=` / `centering_file=` explicitly."
+                )
 
         """
             Storing separate linear transformations for each layer, rather than concat + one
@@ -236,7 +258,9 @@ class ProteinFeatureGraph(nn.Module):
             edge_h_l = self.edge_linears[i](edge_h_l)
             edge_h = edge_h_l if edge_h is None else edge_h + edge_h_l
         if edge_h is None:
-            edge_h = torch.zeros(list(X.shape[:2]) + [self.dim_nodes], device=X.device)
+            edge_h = torch.zeros(
+                list(edge_idx.shape) + [self.dim_edges], device=X.device
+            )
 
         # Apply masks
         node_h = mask_i.unsqueeze(-1) * node_h
@@ -244,54 +268,130 @@ class ProteinFeatureGraph(nn.Module):
 
         return node_h, edge_h, edge_idx, mask_i, mask_ij
 
-    def _load_centering_params(self, reference_pdb: str):
-        basepath = os.path.join(tempfile.gettempdir(), "generate", "params")
-        if not os.path.exists(basepath):
-            os.makedirs(basepath)
+    def _initialize_centering_params(self):
+        if not self.centered:
+            return
+        for i, layer in enumerate(self.node_layers):
+            self.register_buffer(
+                f"node_means_{i}", torch.zeros(1, 1, layer.dim_out, dtype=torch.float32)
+            )
+        for i, layer in enumerate(self.edge_layers):
+            self.register_buffer(
+                f"edge_means_{i}", torch.zeros(1, 1, layer.dim_out, dtype=torch.float32)
+            )
 
-        filename = f"centering_{reference_pdb}.params"
-        self.centering_file = os.path.join(basepath, filename)
-        key = (
-            reference_pdb
+    def _build_centering_key(self, reference_pdb: str):
+        return (
+            reference_pdb.lower()
             + ";"
             + json.dumps(self.node_features)
             + ";"
             + json.dumps(self.edge_features)
         )
 
-        # Attempt to load saved centering params, otherwise compute and cache
+    def _default_centering_file(self, reference_pdb: str):
+        basepath = os.path.join(tempfile.gettempdir(), "generate", "params")
+        if not os.path.exists(basepath):
+            os.makedirs(basepath)
+        filename = f"centering_{reference_pdb}.params"
+        return os.path.join(basepath, filename)
+
+    def _packaged_centering_file(self, reference_pdb: str):
+        path = (
+            resources.files("chroma")
+            .joinpath("assets")
+            .joinpath("centering")
+            .joinpath(f"centering_{reference_pdb}.params")
+        )
+        return path if path.is_file() else None
+
+    def _read_centering_params(self, centering_file: str, reference_pdb: str):
+        prefix = self._build_centering_key(reference_pdb) + "\t"
         json_line = None
-        with open(self.centering_file, "a+") as f:
-            prefix = key + "\t"
+        with open(centering_file, "a+") as f:
             f.seek(0)
             for line in f:
                 if line.startswith(prefix):
                     json_line = line.split(prefix)[1]
                     break
+        if json_line is None:
+            return None
+        return json.loads(json_line)
 
-            if json_line is not None:
-                print("Loaded from cache")
-                param_dictionary = json.loads(json_line)
-            else:
-                print(f"Computing reference stats for {reference_pdb}")
-                param_dictionary = self._reference_stats(reference_pdb)
-                json_line = json.dumps(param_dictionary)
-                f.write(prefix + "\t" + json_line + "\n")
+    def _write_centering_params(
+        self, centering_file: str, reference_pdb: str, param_dictionary: dict
+    ):
+        prefix = self._build_centering_key(reference_pdb) + "\t"
+        with open(centering_file, "a+") as f:
+            f.seek(0)
+            for line in f:
+                if line.startswith(prefix):
+                    return
+            f.write(prefix + "\t" + json.dumps(param_dictionary) + "\n")
 
+    def _set_centering_params(self, param_dictionary: dict):
         for i, layer in enumerate(self.node_layers):
             key = json.dumps(self.node_features[i])
-            tensor = torch.tensor(param_dictionary[key], dtype=torch.float32)
-            tensor = tensor.view(1, 1, -1)
-            self.register_buffer(f"node_means_{i}", tensor)
+            tensor = torch.tensor(param_dictionary[key], dtype=torch.float32).view(
+                1, 1, -1
+            )
+            getattr(self, f"node_means_{i}").copy_(tensor)
 
         for i, layer in enumerate(self.edge_layers):
             key = json.dumps(self.edge_features[i])
-            tensor = torch.tensor(param_dictionary[key], dtype=torch.float32)
-            tensor = tensor.view(1, 1, -1)
-            self.register_buffer(f"edge_means_{i}", tensor)
-        return
+            tensor = torch.tensor(param_dictionary[key], dtype=torch.float32).view(
+                1, 1, -1
+            )
+            getattr(self, f"edge_means_{i}").copy_(tensor)
+
+    def load_centering_params(
+        self,
+        reference_pdb: Optional[str] = None,
+        centering_file: Optional[str] = None,
+        allow_missing: bool = False,
+    ):
+        if not self.centered:
+            return False
+        reference_pdb = (reference_pdb or self.centered_pdb).lower()
+        centering_file = (
+            centering_file
+            or self._packaged_centering_file(reference_pdb)
+            or self._default_centering_file(reference_pdb)
+        )
+        param_dictionary = self._read_centering_params(centering_file, reference_pdb)
+        if param_dictionary is None:
+            if not allow_missing:
+                raise FileNotFoundError(
+                    f"No centering stats found for {reference_pdb} in {centering_file}."
+                )
+            return False
+        self._set_centering_params(param_dictionary)
+        return True
+
+    def precompute_centering_params(
+        self,
+        reference_pdb: Optional[str] = None,
+        centering_file: Optional[str] = None,
+        write_cache: bool = True,
+    ):
+        reference_pdb = (reference_pdb or self.centered_pdb).lower()
+        param_dictionary = self._reference_stats(reference_pdb)
+        self._set_centering_params(param_dictionary)
+        if write_cache:
+            centering_file = centering_file or self._default_centering_file(
+                reference_pdb
+            )
+            self._write_centering_params(
+                centering_file, reference_pdb, param_dictionary
+            )
+        return param_dictionary
 
     def _reference_stats(self, reference_pdb):
+        warnings.warn(
+            "Computing centering stats may download remote PDB data. "
+            "Call this explicitly during preprocessing, not model construction.",
+            stacklevel=2,
+        )
         X, C, _ = Protein.from_PDBID(reference_pdb).to_XCS()
         stats_dict = self._feature_stats(X, C)
         return stats_dict

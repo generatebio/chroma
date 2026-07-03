@@ -123,6 +123,14 @@ def test_potts_mcmc(proposal, debug=False):
         mask_i = mask_i.to(device)
         mask_ij = mask_ij.to(device)
         S_exact = S_exact.to(device)
+    if torch.backends.mps.is_available():
+        device = "mps"
+        h = h.to(device)
+        J = J.to(device)
+        edge_idx = edge_idx.to(device)
+        mask_i = mask_i.to(device)
+        mask_ij = mask_ij.to(device)
+        S_exact = S_exact.to(device)
 
     # Compute exact distribution over sequence space
     B = S_exact.shape[0]

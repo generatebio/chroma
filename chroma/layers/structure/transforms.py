@@ -26,6 +26,10 @@ import torch.nn.functional as F
 
 from chroma.layers import graph
 from chroma.layers.structure import geometry
+from chroma.utility.torch import (
+    call_with_explicit_mps_cpu_fallback,
+    call_with_mps_cpu_fallback,
+)
 
 
 def compose_transforms(
@@ -356,11 +360,13 @@ def average_transforms(
     # Average rotation via SVD
     R_avg_unc = (R * R_probs).sum(dim)
     R_avg_unc = R_avg_unc + dither_eps * torch.randn_like(R_avg_unc)
-    U, S, Vh = torch.linalg.svd(R_avg_unc, full_matrices=True)
+    U, S, Vh = call_with_explicit_mps_cpu_fallback(
+        torch.linalg.svd, R_avg_unc, full_matrices=True
+    )
     R_avg = U @ Vh
 
     # Enforce that matrix is rotation matrix
-    d = torch.linalg.det(R_avg)
+    d = call_with_mps_cpu_fallback(torch.linalg.det, R_avg)
     d_expand = F.pad(d[..., None, None], (2, 0), value=1.0)
     Vh = Vh * d_expand
     R_avg = U @ Vh

@@ -16,4 +16,13 @@
 This package includes io formats and tools for a few common datatypes,
 including antibodies, proteins, sequences, and structures.
 """
-from chroma.data.protein import Protein
+
+from importlib import import_module
+
+__all__ = ["Protein"]
+
+
+def __getattr__(name):
+    if name == "Protein":
+        return import_module("chroma.data.protein").Protein
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

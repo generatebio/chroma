@@ -28,15 +28,30 @@ Internally, Chroma uses diffusion modeling, equivariant graph neural networks, a
 * [Chroma API Tutorial](https://colab.research.google.com/github/generatebio/chroma/blob/main/notebooks/ChromaAPI.ipynb): Code notebook demonstrating protein I/O, sampling, and design configuration directly in `python`.
 * [Chroma Conditioner API Tutorial](https://colab.research.google.com/github/generatebio/chroma/blob/main/notebooks/ChromaConditioners.ipynb): A deeper dive under the hood for implementing new Chroma [Conditioners](#conditioner-api).
 
-**PyPi package**.You can install the latest release of Chroma with:
+
+**Install Chroma from GitHub**
+
+Create a locked Conda environment for your platform
+
 ```
-pip install generate-chroma
+conda create -n chroma --file environment.osx-arm64.lock
 ```
 
-**Install latest Chroma from github**
+On Linux, use:
+
+```
+conda create -n chroma --file environment.linux-64.lock
+```
+
+The shared source spec is `environment.yml`, and `environment_Mac.yaml`
+remains available as the Apple Silicon YAML variant used during development.
+
+Clone from github and install as a package
+
 ```
 git clone https://github.com/generatebio/chroma.git
-pip install -e chroma # use `-e` for it to be editable locally. 
+conda activate chroma
+python -m pip install --no-deps -e . # use `-e` for it to be editable locally.
 ```
 
 ## Sampling
@@ -101,7 +116,7 @@ The value of diffusion time conditioning $t$ can be set via the `design_t` param
 from chroma import Protein, Chroma
 chroma = Chroma()
 
-protein = Protein('1GFP')
+protein = Protein.from_PDBID('1GFP')
 protein = chroma.design(protein)
 
 protein.to("1GFP-redesign.cif")

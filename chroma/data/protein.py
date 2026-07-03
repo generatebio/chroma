@@ -19,7 +19,6 @@ import os
 import tempfile
 from typing import List, Optional, Tuple, Union
 
-import nglview as nv
 import torch
 
 import chroma.utility.polyseq as polyseq
@@ -74,43 +73,39 @@ class Protein:
                 )
 
         elif len(args) == 1 and isinstance(args[0], str):
-            if args[0].lower().startswith("s3:"):
+            input_string = args[0]
+            if input_string.lower().startswith("s3:"):
                 raise NotImplementedError(
                     "download of cifs or pdbs from s3 not supported."
                 )
 
-            if args[0].endswith(".cif"):
+            if input_string.endswith(".cif"):
                 return cls.from_CIF(*args, **kwargs)
 
-            elif args[0].endswith(".pdb"):
+            elif input_string.endswith(".pdb"):
                 return cls.from_PDB(*args, **kwargs)
 
-            else:  # PDB or Sequence String
-                # Check if it is a valid PDB
-                import requests
+            elif os.path.exists(input_string):
+                suffix = os.path.splitext(input_string)[1].lower()
+                if suffix == ".cif":
+                    return cls.from_CIF(*args, **kwargs)
+                if suffix == ".pdb":
+                    return cls.from_PDB(*args, **kwargs)
+                raise NotImplementedError(
+                    "Local structure files must use a supported extension such as"
+                    " `.cif` or `.pdb`."
+                )
 
-                url = f"https://data.rcsb.org/rest/v1/core/entry/{args[0]}"
-                VALID_PDBID = requests.get(url).status_code == 200
-                VALID_SEQUENCE = all([s in PROTEIN_TOKENS for s in args[0]])
-
-                if VALID_PDBID:
-                    # This only works if connected to the internet,
-                    # so maybe better status checking will help here
-                    if VALID_PDBID and VALID_SEQUENCE:
-                        raise Warning(
-                            "Ambuguous input, this is both a valid Sequence string and"
-                            " a valid PDBID. Interpreting as a PDBID, if you wish to"
-                            " initialize as a sequence string please explicitly"
-                            " initialize as Protein.from_sequence(MY_SEQUENCE)."
-                        )
-                    return cls.from_PDBID(*args, **kwargs)
-                elif VALID_SEQUENCE:
+            else:
+                valid_sequence = all([s in PROTEIN_TOKENS for s in input_string])
+                if valid_sequence:
                     return cls.from_sequence(*args, **kwargs)
-                else:
-                    raise NotImplementedError(
-                        "Could Not Identify a valid input Type. See docstring for"
-                        " details."
-                    )
+                raise NotImplementedError(
+                    "Could not identify a valid local input type. Use"
+                    " `Protein.from_PDBID(...)` for remote PDB downloads,"
+                    " pass a local `.cif` or `.pdb` path, or use"
+                    " `Protein.from_sequence(...)` for sequence strings."
+                )
         else:
             raise NotImplementedError(
                 "Inputs must either be a 3-tuple of XCS tensors, or a single string"
@@ -383,7 +378,7 @@ class Protein:
         explicit saving is still available with the respective export methods.
 
         Args:
-            device (str): The desired device for tensor operations, e.g., 'cpu' or 'cuda'.
+            device (str): The desired device for tensor operations, e.g., 'cpu' or 'cuda' or 'mps'.
         """
         if file_path.lower().endswith(".pdb"):
             self.to_PDB(file_path, force=force)
@@ -444,7 +439,7 @@ class Protein:
         else:
             raise Exception(f"unknown sequence format {format}")
 
-    def display(self, representations: list = []) -> None:
+    def display(self, representations: Optional[list] = None) -> None:
         """
         Display the protein using the provided representations in NGL view.
 
@@ -454,20 +449,14 @@ class Protein:
         Returns:
             viewer: A viewer object for interactive visualization.
         """
-        from chroma.utility.ngl import SystemTrajectory, view_gsystem
+        from chroma.utility.ngl import view_protein
 
-        if self.sys.num_models() == 1:
-            viewer = view_gsystem(self.sys)
-            for rep in representations:
-                viewer.add_representation(rep)
-
-        else:
-            t = SystemTrajectory(self)
-            viewer = nv.NGLWidget(t)
-        return viewer
+        return view_protein(self, representations=representations)
 
     def _ipython_display_(self):
-        display(self.display())
+        from IPython.display import display as ipython_display
+
+        ipython_display(self.display())
 
     def __str__(self):
         """Define Print Behavior

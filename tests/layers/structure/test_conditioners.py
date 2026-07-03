@@ -11,6 +11,7 @@ from chroma.data.protein import Protein
 from chroma.layers.structure import backbone, conditioners, rmsd, symmetry
 from chroma.models.graph_backbone import GraphBackbone
 from chroma.models.procap import ProteinCaption
+from tests.helpers import cif_path
 
 
 @pytest.fixture(scope="session")
@@ -26,8 +27,7 @@ def XCO():
 
 @pytest.fixture(scope="session")
 def protein():
-    pdb_id = "1drf"
-    protein = Protein.from_PDBID(pdb_id, canonicalize=True)
+    protein = Protein.from_CIF(cif_path("1drf"), canonicalize=True)
     protein.sys.save_selection(gti=list(range(15)), selname="clamp")
     protein.sys.save_selection(gti=list(range(15, 25)), selname="semirigid")
     return protein
@@ -138,6 +138,8 @@ def test_sampling(gaussian_noise, conditioner, request):
     )
 
 
+@pytest.mark.integration
+@pytest.mark.slow
 def test_proclass_conditioner(protein):
     """Smoke test for secondary structure conditioning"""
     SECONDARY_STRUCTURE = "CCEEEEEEEETTTTECTTTTTTTTCCCHHHHHHHHHHHHCCCTTTTEEEEEECHHHHHHCTGGTTTTTTTEEEEETTTTTTTTTTTCEEECTHHHHHHHHHCHGHGGHCCEEEEEECHHHHHHHHHCTCEEEEEEEEETTCCCTTEECCCCTGGGTEEETETTTTTCCEEEETTEEEEEEEEEEEC"

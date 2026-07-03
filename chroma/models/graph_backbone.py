@@ -15,7 +15,6 @@
 """Models for generating protein backbone structure via diffusion.
 """
 
-from types import SimpleNamespace
 from typing import Optional, Tuple, Union
 
 import torch
@@ -24,7 +23,12 @@ import torch.nn as nn
 from chroma.data.xcs import validate_XC
 from chroma.layers import basic, graph
 from chroma.layers.structure import backbone, diffusion, transforms
-from chroma.models.graph_design import BackboneEncoderGNN
+from chroma.models.graph_design_components import BackboneEncoderGNN
+from chroma.models.model_configs import (
+    GraphBackboneConfig,
+    build_model_config,
+    config_to_kwargs,
+)
 from chroma.utility.model import load_model as utility_load_model
 
 
@@ -96,13 +100,50 @@ class GraphBackbone(nn.Module):
         """Initialize GraphBackbone network."""
         super(GraphBackbone, self).__init__()
 
-        # Save configuration in kwargs
-        self.kwargs = locals()
-        self.kwargs.pop("self")
-        for key in list(self.kwargs.keys()):
-            if key.startswith("__") and key.endswith("__"):
-                self.kwargs.pop(key)
-        args = SimpleNamespace(**self.kwargs)
+        self.config, self.extra_kwargs = build_model_config(
+            GraphBackboneConfig,
+            {
+                "dim_nodes": dim_nodes,
+                "dim_edges": dim_edges,
+                "num_neighbors": num_neighbors,
+                "node_features": node_features,
+                "edge_features": edge_features,
+                "num_layers": num_layers,
+                "dropout": dropout,
+                "node_mlp_layers": node_mlp_layers,
+                "node_mlp_dim": node_mlp_dim,
+                "edge_update": edge_update,
+                "edge_mlp_layers": edge_mlp_layers,
+                "edge_mlp_dim": edge_mlp_dim,
+                "skip_connect_input": skip_connect_input,
+                "mlp_activation": mlp_activation,
+                "decoder_num_hidden": decoder_num_hidden,
+                "graph_criterion": graph_criterion,
+                "graph_random_min_local": graph_random_min_local,
+                "backbone_update_method": backbone_update_method,
+                "backbone_update_iterations": backbone_update_iterations,
+                "backbone_update_num_weights": backbone_update_num_weights,
+                "backbone_update_unconstrained": backbone_update_unconstrained,
+                "use_time_features": use_time_features,
+                "time_feature_type": time_feature_type,
+                "time_log_feature_scaling": time_log_feature_scaling,
+                "noise_schedule": noise_schedule,
+                "noise_covariance_model": noise_covariance_model,
+                "noise_beta_min": noise_beta_min,
+                "noise_beta_max": noise_beta_max,
+                "noise_log_snr_range": noise_log_snr_range,
+                "noise_complex_scaling": noise_complex_scaling,
+                "loss_scale": loss_scale,
+                "loss_scale_ssnr_cutoff": loss_scale_ssnr_cutoff,
+                "loss_function": loss_function,
+                "checkpoint_gradients": checkpoint_gradients,
+                "prediction_type": prediction_type,
+                "num_graph_cycles": num_graph_cycles,
+                **kwargs,
+            },
+        )
+        self.kwargs = config_to_kwargs(self.config, self.extra_kwargs)
+        args = self.config
 
         # Important global options
         self.dim_nodes = args.dim_nodes
@@ -386,8 +427,8 @@ def load_model(
     Args:
         weight_file (str): The destination path of the model weights to load.
             Compatible with files saved by `save_model`.
-        device (str, optional): Pytorch device specification, e.g. `'cuda'` for
-        GPU. Default is `'cpu'`.
+        device (str, optional): Pytorch device specification, e.g. `'cuda'` or `'mps'` for
+        GPU or `'cpu'` in the absence of GPU. Default is `'cpu'`.
         strict (bool): Whether to require that the keys match between the
             input file weights and the model created from the parameters stored
             in the model kwargs.

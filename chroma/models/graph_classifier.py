@@ -15,9 +15,7 @@
 """Models for generating protein sequence and side chain conformations
 given backbones. These can be used for sequence design and packing.
 """
-
-
-from types import SimpleNamespace
+from typing import Optional
 
 import torch
 import torch.nn as nn
@@ -28,8 +26,25 @@ from chroma.layers.attention import AttentionChainPool
 from chroma.layers.basic import NodeProduct, NoOp
 from chroma.layers.graph import MLP, MaskedNorm
 from chroma.layers.structure import diffusion
-from chroma.models.graph_design import BackboneEncoderGNN
+from chroma.models.graph_design_components import BackboneEncoderGNN
+from chroma.models.model_configs import (
+    GraphClassifierConfig,
+    build_model_config,
+    config_to_kwargs,
+)
 from chroma.utility.model import load_model as utility_load_model
+
+
+class ComplexPool(nn.Module):
+    """Pool residue embeddings into a single complex embedding."""
+
+    def __init__(self, n_head, d_model):
+        super().__init__()
+        self.chain_pool = AttentionChainPool(n_head, d_model)
+
+    def forward(self, h, C):
+        pooled_h, complex_mask = self.chain_pool(h, (C > 0).long())
+        return pooled_h, complex_mask.squeeze(-1)
 
 
 class GraphClassifier(nn.Module):
@@ -72,7 +87,7 @@ class GraphClassifier(nn.Module):
         noise_beta_min=0.2,
         noise_beta_max=70.0,
         checkpoint_gradients=False,
-        class_config={},
+        class_config: Optional[dict] = None,
         out_mlp_layers=2,
         noise_covariance_model="globular",
         noise_log_snr_range=(-7.0, 13.5),
@@ -85,25 +100,58 @@ class GraphClassifier(nn.Module):
         """Initialize GraphBackbone network."""
         super().__init__()
 
-        # Save configuration in kwargs
-        self.kwargs = locals()
-        self.kwargs.pop("self")
-        for key in list(self.kwargs.keys()):
-            if key.startswith("__") and key.endswith("__"):
-                self.kwargs.pop(key)
-        args = SimpleNamespace(**self.kwargs)
+        class_config = {} if class_config is None else class_config
 
-        self.class_config = class_config
+        self.config, self.extra_kwargs = build_model_config(
+            GraphClassifierConfig,
+            {
+                "dim_nodes": dim_nodes,
+                "dim_edges": dim_edges,
+                "num_neighbors": num_neighbors,
+                "node_features": node_features,
+                "edge_features": edge_features,
+                "num_layers": num_layers,
+                "dropout": dropout,
+                "node_mlp_layers": node_mlp_layers,
+                "node_mlp_dim": node_mlp_dim,
+                "edge_update": edge_update,
+                "edge_mlp_layers": edge_mlp_layers,
+                "edge_mlp_dim": edge_mlp_dim,
+                "skip_connect_input": skip_connect_input,
+                "mlp_activation": mlp_activation,
+                "graph_criterion": graph_criterion,
+                "graph_random_min_local": graph_random_min_local,
+                "use_time_features": use_time_features,
+                "noise_schedule": noise_schedule,
+                "noise_beta_min": noise_beta_min,
+                "noise_beta_max": noise_beta_max,
+                "checkpoint_gradients": checkpoint_gradients,
+                "class_config": class_config,
+                "out_mlp_layers": out_mlp_layers,
+                "noise_covariance_model": noise_covariance_model,
+                "noise_log_snr_range": noise_log_snr_range,
+                "time_feature_type": time_feature_type,
+                "time_log_feature_scaling": time_log_feature_scaling,
+                "fourier_scale": fourier_scale,
+                "zero_grad_fix": zero_grad_fix,
+                **kwargs,
+            },
+        )
+        self.kwargs = config_to_kwargs(self.config, self.extra_kwargs)
+        args = self.config
+
+        self.class_config = args.class_config
         # Important global options
         self.dim_nodes = args.dim_nodes
         self.dim_edges = args.dim_edges
         self.mlp_activation = args.mlp_activation
         self.zero_grad_fix = zero_grad_fix
 
-        if "random_fourier_2mer" in args.edge_features:
-            index = args.edge_features.index("random_fourier_2mer")
-            args.edge_features.pop(index)
-            args.edge_features.append(
+        edge_features = list(args.edge_features)
+        if "random_fourier_2mer" in edge_features:
+            index = edge_features.index("random_fourier_2mer")
+            edge_features.pop(index)
+            edge_features.append(
                 (
                     "random_fourier_2mer",
                     {
@@ -120,7 +168,7 @@ class GraphClassifier(nn.Module):
             dim_edges=args.dim_edges,
             num_neighbors=args.num_neighbors,
             node_features=args.node_features,
-            edge_features=args.edge_features,
+            edge_features=edge_features,
             num_layers=args.num_layers,
             node_mlp_layers=args.node_mlp_layers,
             node_mlp_dim=args.node_mlp_dim,
@@ -154,7 +202,7 @@ class GraphClassifier(nn.Module):
             covariance_model=args.noise_covariance_model,
         )
 
-        self._init_heads(class_config, dim_nodes, out_mlp_layers, dropout)
+        self._init_heads(args.class_config, dim_nodes, out_mlp_layers, dropout)
         self.condition_sequence_frequency = 0.3
 
     def _init_heads(self, class_config, dim_nodes, out_mlp_layers, dropout):
@@ -169,7 +217,7 @@ class GraphClassifier(nn.Module):
             if group == "chain":
                 pool = AttentionChainPool(8, dim_nodes)
             elif group == "complex":
-                raise NotImplementedError
+                pool = ComplexPool(8, dim_nodes)
             elif group == "second_order":
                 pool = NoOp()
             else:
@@ -279,6 +327,8 @@ class GraphClassifier(nn.Module):
             if level == "chain":
                 node_h, c_mask = pool(node_h, C)
                 c_mask = c_mask
+            elif level == "complex":
+                node_h, c_mask = pool(node_h, C)
             elif level == "first_order":
                 c_mask = C > 0
             elif level == "second_order":
@@ -287,6 +337,8 @@ class GraphClassifier(nn.Module):
             node_h = head(node_h)
 
             if mask is not None:
+                if level == "complex" and mask.dim() > c_mask.dim():
+                    mask = mask.squeeze(-1)
                 c_mask = mask & c_mask
 
             if self.class_config[label]["loss"] == "ce":
@@ -294,9 +346,7 @@ class GraphClassifier(nn.Module):
             else:
                 neglogp = node_h.sigmoid().log().mul(-1)
 
-            index = (
-                self.class_config[label]["tokenizer"][value] if value is not None else 0
-            )
+            index = self.class_config[label]["tokenizer"][value] if value is not None else 0
             neglogp = neglogp[..., index][c_mask].sum()
             neglogp.backward()
             grad = scale * X.grad
@@ -328,8 +378,8 @@ def load_model(
     Args:
         weight_file (str): The destination path of the model weights to load.
             Compatible with files saved by `save_model`.
-        device (str, optional): Pytorch device specification, e.g. `'cuda'` for
-        GPU. Default is `'cpu'`.
+        device (str, optional): Pytorch device specification, e.g. `'cuda'` or `'mps'` for
+        GPU or `'cpu' in the absence of GPU. `Default is `'cpu'`.
         strict (bool): Whether to require that the keys match between the
             input file weights and the model created from the parameters stored
             in the model kwargs.

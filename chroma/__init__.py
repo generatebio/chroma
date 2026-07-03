@@ -12,8 +12,19 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from importlib import import_module
+
 __version__ = "1.0.0"
-from chroma.data.protein import Protein
-from chroma.layers.structure import conditioners
-from chroma.models.chroma import Chroma
-from chroma.utility import api
+__all__ = ["__version__", "Protein", "conditioners", "Chroma", "api"]
+
+
+def __getattr__(name):
+    if name == "Protein":
+        return import_module("chroma.data.protein").Protein
+    if name == "conditioners":
+        return import_module("chroma.layers.structure.conditioners")
+    if name == "Chroma":
+        return import_module("chroma.models.chroma").Chroma
+    if name == "api":
+        return import_module("chroma.utility.api")
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

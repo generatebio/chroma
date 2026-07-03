@@ -4,10 +4,11 @@ import torch
 from chroma.data import Protein
 from chroma.layers.structure import backbone, protein_graph
 from chroma.models.graph_backbone import GraphBackbone
+from tests.helpers import cif_path
 
 
 def test_denoiser(dim_nodes=32, dim_edges=32):
-    X, C, S = Protein("1SHG").to_XCS()
+    X, C, S = Protein(cif_path("1shg")).to_XCS()
     model = GraphBackbone(dim_nodes=dim_nodes, dim_edges=dim_edges)
 
     # check if denoiser is working as expected
@@ -99,7 +100,7 @@ def test_equivariance_graph_update(
     _rotate = lambda X_input: transformer(X_input, dX_rotate, q_rotate)
 
     # Load test structure and canonicalize
-    X, C, S = Protein("1qys").to_XCS()
+    X, C, S = Protein(cif_path("1qys")).to_XCS()
     R, t, _ = bb_update.frame_builder.inverse(X, C)
     X = bb_update.frame_builder.forward(R, t, C)
 

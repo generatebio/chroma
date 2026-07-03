@@ -22,6 +22,7 @@ import torch.nn as nn
 from chroma.layers import graph
 from chroma.layers.linalg import eig_leading
 from chroma.layers.structure import geometry, protein_graph
+from chroma.utility.torch import call_with_mps_cpu_fallback
 
 
 class CrossRMSD(nn.Module):
@@ -108,7 +109,7 @@ class CrossRMSD(nn.Module):
 
         # Compute optimal quaternion by extracting leading eigenvector
         if self.method == "symeig":
-            top_eig = torch.linalg.eigvalsh(F)[:, :, 3]
+            top_eig = call_with_mps_cpu_fallback(torch.linalg.eigvalsh, F)[:, :, 3]
         elif self.method == "power":
             top_eig, vec = eig_leading(F, num_iterations=self.method_iter)
         else:
@@ -190,7 +191,7 @@ class CrossRMSD(nn.Module):
 
         # Compute optimal quaternion by extracting leading eigenvector
         if self.method == "symeig":
-            L, V = torch.linalg.eigh(F)
+            L, V = call_with_mps_cpu_fallback(torch.linalg.eigh, F)
             top_eig = L[:, 3]
             vec = V[:, :, 3]
         elif self.method == "power":

@@ -7,6 +7,7 @@ import torch
 from chroma import constants
 from chroma.data import Protein
 from chroma.layers.structure import backbone, sidechain
+from tests.helpers import cif_path
 
 
 class TestSideChain(TestCase):
@@ -19,8 +20,7 @@ class TestSideChain(TestCase):
         self.distance_loss = sidechain.LossAllAtomDistances()
         self.frame_builder = sidechain.AllAtomFrameBuilder()
 
-        pdb_id = "1SHG"
-        self.X, self.C, self.S = Protein(pdb_id).to_XCS(all_atom=True)
+        self.X, self.C, self.S = Protein(cif_path("1shg")).to_XCS(all_atom=True)
 
     def test_chi_cartesian_round_trip(self):
         X, C, S = self.X, self.C, self.S

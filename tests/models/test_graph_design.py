@@ -67,3 +67,14 @@ def test_graph_design_outputs(model, XCS):
     assert torch.allclose(outputs["X_noise"], X)
     for key in ["chi", "logp_chi"]:
         assert outputs[key].shape[:-1] == X.shape[:2] and outputs[key].shape[-1] == 4
+
+
+def test_graph_design_noise_without_sidechains_preserves_shape(XCS):
+    X, C, S = XCS
+    model = GraphDesign(sidechains=False, separate_packing=False, noise_schedule="log_snr")
+    model.eval()
+
+    outputs = model(X, C, S, sample_noise=True)
+
+    assert outputs["X_noise"].shape == X.shape
+    assert torch.isfinite(outputs["X_noise"]).all()

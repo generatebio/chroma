@@ -8,7 +8,7 @@ from chroma.layers.norm import MaskedBatchNorm1d
 class TestBatchNorm(TestCase):
     def test_norm(self):
         device = (
-            torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+            torch.device('mps' if torch.backends.mps.is_available() else 'cuda' if torch.cuda.is_available() else 'cpu')
         )
         B, C, L = (3, 5, 7)
         x1 = torch.randn(B, C, L).to(device)

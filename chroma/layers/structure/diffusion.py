@@ -237,7 +237,7 @@ class GaussianNoiseSchedule:
 
     def beta(self, t: Union[float, torch.Tensor]) -> torch.Tensor:
         """compute the drift coefficient for the OU process of the form
-        $dx = -\frac{1}{2} \beta(t) x dt + g(t) dw_t$
+        $dx = -\\frac{1}{2} \\beta(t) x dt + g(t) dw_t$
 
         Args:
             t (Union[float, torch.Tensor]): t in [0, 1]
@@ -255,7 +255,7 @@ class GaussianNoiseSchedule:
 
     def g(self, t: Union[float, torch.Tensor]) -> torch.Tensor:
         """compute drift coefficient for the OU process:
-        $dx = -\frac{1}{2} \beta(t) x dt + g(t) dw_t$
+        $dx = -\\frac{1}{2} \\beta(t) x dt + g(t) dw_t$
 
         Args:
             t (Union[float, torch.Tensor]): t in [0, 1]
@@ -910,7 +910,7 @@ class DiffusionChainCov(nn.Module):
         conditioner: Callable = None,
         detach_X0: bool = True,
         align_X0: bool = True,
-        U_traj: List = [],
+        U_traj: Optional[List] = None,
     ) -> torch.Tensor:
         """Compute the score function
 
@@ -953,7 +953,8 @@ class DiffusionChainCov(nn.Module):
                 Xt, X0_func, Ct, t, detach_X0=detach_X0, align_X0=align_X0
             )
 
-            U_traj.append(U_diffusion.detach().cpu())
+            if U_traj is not None:
+                U_traj.append(U_diffusion.detach().cpu())
 
             # Compute score function as negative energy gradient
             U_total = U_diffusion.sum() + U_conditioner.sum()
@@ -1461,8 +1462,8 @@ class DiffusionChainCov(nn.Module):
         self, X0: torch.Tensor, score: torch.Tensor, C: torch.tensor, t: torch.Tensor
     ) -> torch.Tensor:
         """Use Bayes theorem and Tweedie formula to obtain a conditional X0 given
-        prior X0 and a conditional score \nabla_x p( y | x)
-        X0 <- X0 + \frac{sigma_t**2}{alpha_t} \Sigma score
+        prior X0 and a conditional score \\nabla_x p( y | x)
+        X0 <- X0 + \\frac{sigma_t**2}{alpha_t} \\Sigma score
         Args:
             X0 (torch.Tensor): backbone coordinates of size (batch, num_residues, 4, 3)
             score (torch.Tensor): of size (batch, num_residues, 4, 3)

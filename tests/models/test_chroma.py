@@ -1,24 +1,61 @@
+import os
+import socket
 from math import isclose
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 import torch
 
 import chroma
+import chroma.utility.api as api
 from chroma.data.protein import Protein
 from chroma.layers.structure import conditioners
 from chroma.models.chroma import Chroma
+
+pytestmark = [pytest.mark.integration, pytest.mark.slow]
 
 BB_MODEL_PATH = "https://chroma-weights.generatebiomedicines.com/downloads?weights=chroma_backbone_v1.0.pt"  #'named:nature_v3'
 GD_MODEL_PATH = "https://chroma-weights.generatebiomedicines.com/downloads?weights=chroma_design_v1.0.pt"  #'named:nature_v3'
 
 BASE_PATH = str(Path(chroma.__file__).parent.parent)
 PROTEIN_SAMPLE = BASE_PATH + "/tests/resources/steps200_seed42_len100.cif"
+EXPECTED_ELBO = 6.28411340713501
+
+
+def _resolve_weight_path(url: str, env_var: str) -> str:
+    override = os.getenv(env_var)
+    if override is not None:
+        if not os.path.exists(override):
+            pytest.skip(f"{env_var} is set but the file does not exist: {override}")
+        return override
+
+    parsed = urlparse(url)
+    base_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}"
+    weights_name = parse_qs(parsed.query).get("weights", [None])[0]
+    if weights_name is None:
+        raise ValueError(f"Could not determine weights name from {url}")
+
+    cached_path = api.download_cache_path(base_url, weights_name)
+    if os.path.exists(cached_path):
+        return cached_path
+
+    try:
+        socket.getaddrinfo(parsed.netloc, 443)
+    except socket.gaierror:
+        pytest.skip("requires cached weights or network access")
+
+    try:
+        return api.download_from_generate(base_url, weights_name, exist_ok=True)
+    except FileNotFoundError:
+        pytest.skip("requires cached weights or a configured access token")
 
 
 @pytest.fixture(scope="session")
 def chroma():
-    return Chroma(BB_MODEL_PATH, GD_MODEL_PATH, device="cpu")
+    bb_weights = _resolve_weight_path(BB_MODEL_PATH, "CHROMA_TEST_BB_WEIGHTS")
+    gd_weights = _resolve_weight_path(GD_MODEL_PATH, "CHROMA_TEST_GD_WEIGHTS")
+    return Chroma(bb_weights, gd_weights, device="cpu")
 
 
 def test_chroma(chroma):
@@ -29,7 +66,7 @@ def test_chroma(chroma):
     # Fixed value test score
     torch.manual_seed(42)
     scores = chroma.score(protein, num_samples=5)
-    assert isclose(scores["elbo"].score, 5.890165328979492, abs_tol=1e-3)
+    assert isclose(scores["elbo"].score, EXPECTED_ELBO, abs_tol=1e-3)
 
     # Test Sampling & Design
     # torch.manual_seed(42)

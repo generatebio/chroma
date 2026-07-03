@@ -229,7 +229,7 @@ def subsample(
 
     X_subdomain = X.reshape(1, G.shape[0], -1, 4, 3)[:, subdomain_idx]
     X_subdomain = X_subdomain.reshape(1, -1, 4, 3)
-    C_subdomain = C.reshape(1, G.shape[0], -1)[:, : knbr + 1, :].reshape(1, -1)
+    C_subdomain = C.reshape(1, G.shape[0], -1)[:, subdomain_idx, :].reshape(1, -1)
 
     return X_subdomain, C_subdomain, subdomain_idx, seed_idx
 

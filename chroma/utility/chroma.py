@@ -26,13 +26,21 @@ from chroma.constants import AA20
 from chroma.data import Protein
 from chroma.layers.structure import backbone
 
+DEFAULT_FONT = os.path.join(
+    os.path.dirname(chroma.__path__[0]), "assets/LiberationSans-Regular.ttf"
+)
+
+
+def _load_font(font, fontsize):
+    if font and os.path.exists(font):
+        return ImageFont.truetype(font, fontsize)
+    return ImageFont.load_default()
+
 
 def letter_to_point_cloud(
     letter="G",
     width_pixels=35,
-    font=os.path.join(
-        os.path.dirname(chroma.__path__[0]), "assets/LiberationSans-Regular.ttf"
-    ),
+    font=DEFAULT_FONT,
     depth_ratio=0.15,
     fontsize_ratio=1.2,
     stroke_width=1,
@@ -43,7 +51,7 @@ def letter_to_point_cloud(
     depth = int(depth_ratio * width_pixels)
     fontsize = int(fontsize_ratio * width_pixels)
 
-    font = ImageFont.truetype(font, fontsize)
+    font = _load_font(font, fontsize)
     ascent, descent = font.getmetrics()
     text_width = font.getmask(letter).getbbox()[2]
     text_height = font.getmask(letter).getbbox()[3] + descent

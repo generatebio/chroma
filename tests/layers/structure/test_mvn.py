@@ -14,6 +14,7 @@ from chroma.layers.structure.mvn import (
     ConditionalBackboneMVNGlobular,
 )
 from chroma.layers.structure.rmsd import BackboneRMSD
+from tests.helpers import cif_path
 
 
 @pytest.fixture(params=["brownian", "globular", "residue_gas"])
@@ -131,7 +132,7 @@ def test_invertibility_covariance(noise, XCS, debug=False):
 
 def test_log_determinant(noise):
     """Test log determinant of the covariance matrix."""
-    X, C, S = Protein("5imm").to_XCS()
+    X, C, S = Protein(cif_path("5imm")).to_XCS()
 
     X = X[0:1, ...]
     C = C[0:1, ...]
@@ -161,7 +162,7 @@ def test_cmvn(noise):
         pass
     else:
         aligner = BackboneRMSD()
-        protein = Protein("1drf")
+        protein = Protein(cif_path("1drf"))
         X, C, S = protein.to_XCS()
         protein.sys.save_selection(gti=list(range(14)), selname="clamp")
         cmvn = ConditionalBackboneMVNGlobular(

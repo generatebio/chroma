@@ -28,6 +28,7 @@ import torch.nn.functional as F
 
 from chroma.layers import conv
 from chroma.layers.structure import backbone
+from chroma.utility.torch import call_with_mps_cpu_fallback
 
 
 class BackboneMVNGlobular(torch.nn.Module):
@@ -566,6 +567,8 @@ class ConditionalBackboneMVNGlobular(BackboneMVNGlobular):
 
         R_clamp_inverse = torch.linalg.pinv(self.R_clamp)
         self.register_buffer("R_clamp_inverse", R_clamp_inverse)
+        RRt_clamp_inverse = torch.linalg.pinv(self.RRt_clamp)
+        self.register_buffer("RRt_clamp_inverse", RRt_clamp_inverse)
         self.register_buffer("mu_sample", self.mu(X))
 
     def _center_of_mass(self, X, C):
@@ -709,7 +712,8 @@ class ConditionalBackboneMVNGlobular(BackboneMVNGlobular):
         self.register_buffer("S22", RRt[self.nonzero_indices][:, self.nonzero_indices])
 
         S_clamp = self.S11 - ((self.S12 @ torch.linalg.pinv(self.S22) @ self.S21))
-        R_clamp = torch.linalg.cholesky(S_clamp)
+        R_clamp = call_with_mps_cpu_fallback(torch.linalg.cholesky, S_clamp)
+        
         self.register_buffer("RRt_clamp_restricted", R_clamp @ R_clamp.t())
         RRt_clamp = self._scatter(
             torch.zeros_like(RRt), self.zero_indices, self.RRt_clamp_restricted

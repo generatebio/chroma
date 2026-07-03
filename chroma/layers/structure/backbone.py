@@ -28,6 +28,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from chroma.layers.structure import geometry, transforms
+from chroma.utility.torch import call_with_mps_cpu_fallback
 
 
 class ProteinBackbone(nn.Module):
@@ -414,9 +415,9 @@ class BackboneBuilder(nn.Module):
             """Recurrence relation for placing atoms (NERF)"""
 
             # Build matrix encoding local reference frame
-            n_a_unnorm = torch.cross(u_minus_2, u_minus_1)
+            n_a_unnorm = torch.cross(u_minus_2, u_minus_1, dim=-1)
             n_a = F.normalize(n_a_unnorm, dim=-1)
-            n_b = torch.cross(n_a, u_minus_1)
+            n_b = torch.cross(n_a, u_minus_1, dim=-1)
 
             # Matrix multiply version
             R = torch.stack([u_minus_1, n_b, n_a], 2)
@@ -1052,12 +1053,12 @@ def impute_masked_X(X: torch.Tensor, C: torch.LongTensor) -> torch.Tensor:
     ix = torch.arange(C_atomic.shape[1], device=X.device).reshape([1, -1])
     mask_atomic_extend = mask_atomic.squeeze(-1)
     ix_mask = mask_atomic_extend * ix - (1 - mask_atomic_extend)
-    ix_left, _ = torch.cummax(ix_mask, dim=1)
+    ix_left, _ = call_with_mps_cpu_fallback(torch.cummax, ix_mask, dim=1)
     ix_flip = torch.flip(
         mask_atomic_extend * ix_mask + (1 - mask_atomic_extend) * C_atomic.shape[1],
         [1],
     )
-    ix_right, _ = torch.cummin(ix_flip, dim=1)
+    ix_right, _ = call_with_mps_cpu_fallback(torch.cummin, ix_flip, dim=1)
     ix_right = torch.flip(ix_right, [1])
 
     ix_left = ix_left.long()

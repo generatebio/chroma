@@ -16,6 +16,30 @@ import torch
 import torch.nn as nn
 
 
+def _normalize_attention_mask(mask, n_head):
+    if mask is None:
+        return None
+    if mask.dim() == 3:
+        return mask.unsqueeze(1).expand(-1, n_head, -1, -1)
+    return mask
+
+
+def _scaled_attention(q, k, v, mask=None, bias=None):
+    logits = torch.einsum("bqhc,bkhc->bhqk", q, k) / q.size(-1) ** 0.5
+    if bias is not None:
+        logits = logits + bias
+    # Fix #1: mask before softmax so masked keys don't inflate the denominator
+    # and the output remains a true convex combination of valid values.
+    # nan_to_num(0.0) guards all-masked query rows (e.g. ghost chains in batches
+    # with heterogeneous chain counts) which would otherwise produce NaN.
+    if mask is not None:
+        logits = logits.masked_fill(~mask, float("-inf"))
+    weights = torch.nn.functional.softmax(logits, dim=-1)
+    weights = weights.nan_to_num(0.0)
+    output = torch.einsum("bhqk,bkhc->bqhc", weights, v)
+    return output, weights
+
+
 class ScaledDotProductAttention(nn.Module):
     """Scaled dot product attention as described in Eqn 1 of Vaswani et al. 2017 [https://arxiv.org/abs/1706.03762].
 
@@ -33,7 +57,7 @@ class ScaledDotProductAttention(nn.Module):
              zeroes (or False) indicate positions that cannot contribute to attention
     Outputs:
         output (torch.tensor) of shape (batch_size, sequence_length_q, d_v). The [i-j]-entry output[i,j,:] is formed as a convex combination of values:
-        \sum_k a_k V[i,k,:] and \sum_k a_k = 1.
+        \\sum_k a_k V[i,k,:] and \\sum_k a_k = 1.
         attentions (torch.tensor) of shape (batch_size, sequence_length_q, sequence_length_k)) where the [b,i,j]-element
         corresponds to the attention value (e.g relative contribution) of position j in the key-tensor to position i in the query tensor in element b of the batch.
     """
@@ -43,18 +67,14 @@ class ScaledDotProductAttention(nn.Module):
         self.softmax = nn.Softmax(dim=-1)
 
     def forward(self, Q, K, V, mask=None):
-        _, _, d = K.size()
-        attn = torch.bmm(Q, K.transpose(1, 2)) / d ** 0.5
-        if mask is not None:
-            attn = attn.float().masked_fill(mask == 0, -1e9)
-
-        attn = self.softmax(attn)
-        if mask is not None:
-            attn = attn.float().masked_fill(mask == 0, 0)
-
-        if V.dtype == torch.float16:
-            attn = attn.half()
-        output = torch.bmm(attn, V)
+        output, attn = _scaled_attention(
+            Q.unsqueeze(2),
+            K.unsqueeze(2),
+            V.unsqueeze(2),
+            mask=None if mask is None else mask.unsqueeze(1),
+        )
+        output = output.squeeze(2)
+        attn = attn.squeeze(1)
         return output, attn
 
 
@@ -94,7 +114,6 @@ class MultiHeadAttention(nn.Module):
         self.Wk = nn.Parameter(torch.Tensor(n_head, d_model, d_k))
         self.Wv = nn.Parameter(torch.Tensor(n_head, d_model, d_v))
         self.Wo = nn.Parameter(torch.Tensor(n_head * d_v, d_model))
-        self.attention = ScaledDotProductAttention()
         self.dropout = nn.Dropout(p=dropout)
         self.reset_parameters()
 
@@ -103,6 +122,12 @@ class MultiHeadAttention(nn.Module):
         nn.init.xavier_normal_(self.Wk)
         nn.init.xavier_normal_(self.Wv)
         nn.init.kaiming_uniform_(self.Wo)
+
+    def _project(self, x, weights):
+        # Compute all head projections in one batched contraction to avoid
+        # Python loops and repeated concatenation across heads.
+        projected = torch.einsum("bld,hdm->hblm", x, weights)
+        return projected.reshape(self.n_head * x.size(0), x.size(1), weights.size(-1))
 
     def forward(self, Q, K, V, bias=None, mask=None):
         mb_size, len_q, d_q_in = Q.size()
@@ -118,18 +143,28 @@ class MultiHeadAttention(nn.Module):
         if d_v_in != d_model:
             raise ValueError("Dimension of V does not match d_model.")
 
-        # treat as a (n_head) size batch and project to d_k and d_v
-        q_s = torch.cat([Q @ W for W in self.Wq])  # (n_head*mb_size) x len_q x d_k
-        k_s = torch.cat([K @ W for W in self.Wk])  # (n_head*mb_size) x len_k x d_k
-        v_s = torch.cat([V @ W for W in self.Wv])  # (n_head*mb_size) x len_v x d_v
+        # Treat the heads as an expanded batch without materializing one
+        # projection pass per head in Python.
+        q_s = self._project(Q, self.Wq)
+        k_s = self._project(K, self.Wk)
+        v_s = self._project(V, self.Wv)
 
         # Attention
-        if mask is not None:
-            mask = mask.repeat(self.n_head, 1, 1)
-        outputs, attns = self.attention(q_s, k_s, v_s, mask=mask)
+        q = q_s.reshape(self.n_head, mb_size, len_q, self.d_k).permute(1, 2, 0, 3)
+        k = k_s.reshape(self.n_head, mb_size, len_k, self.d_k).permute(1, 2, 0, 3)
+        v = v_s.reshape(self.n_head, mb_size, len_v, self.d_v).permute(1, 2, 0, 3)
+        outputs, attns = _scaled_attention(
+            q,
+            k,
+            v,
+            mask=_normalize_attention_mask(mask, self.n_head),
+        )
 
-        # Back to original mb_size batch, result size = mb_size x len_q x (n_head*d_v)
-        outputs = torch.cat(torch.split(outputs, mb_size, dim=0), dim=-1)
+        # Fold the head-major batch back to (batch, query, head * value_dim).
+        outputs = outputs.reshape(mb_size, len_q, self.n_head * self.d_v)
+        attns = attns.permute(1, 0, 2, 3).reshape(
+            self.n_head * mb_size, len_q, len_k
+        )
 
         # Project back to residual size
         outputs = outputs @ self.Wo
@@ -154,30 +189,21 @@ class AttentionChainPool(nn.Module):
 
     def __init__(self, n_head, d_model):
         super().__init__()
-        self.attention = MultiHeadAttention(
-            n_head, d_model, d_model, d_model, dropout=0.0
+        self.attention = Attention(
+            n_head, d_model, d_k=d_model, d_v=d_model, gate=False
         )
 
-    def get_query(self, x):
-        return torch.ones(x.size(0), 1, x.size(2)).type(x.dtype).to(x.device)
+    def get_query(self, x, num_queries=1):
+        return x.new_ones(x.size(0), num_queries, x.size(2))
 
     def forward(self, h, C):
-        bs, num_res = C.size()
-        chains = C.abs().unique()
-        chains = (
-            chains[chains > 0].unsqueeze(-1).repeat(1, bs).reshape(-1).unsqueeze(-1)
-        )
-        num_chains = len(chains.unique())
+        chain_ids = C.abs().unique()
+        chain_ids = chain_ids[chain_ids > 0]
+        num_chains = len(chain_ids)
 
-        h_repeat = h.repeat(num_chains, 1, 1)
-        C_repeat = C.repeat(num_chains, 1)
-        mask = (C_repeat == chains).unsqueeze(-2)
-
-        output, _ = self.attention(
-            self.get_query(h_repeat), h_repeat, h_repeat, mask=mask
-        )
-        output = torch.cat(output.split(bs), 1)
-        chain_mask = torch.stack(mask.squeeze(1).any(dim=-1).split(bs), -1)
+        mask = C.abs().unsqueeze(1) == chain_ids.view(1, num_chains, 1)
+        output = self.attention(self.get_query(h, num_queries=num_chains), h, h, mask=mask)
+        chain_mask = mask.any(dim=-1)
         return output, chain_mask
 
 
@@ -232,24 +258,16 @@ class Attention(nn.Module):
 
     def forward(self, Q, K, V, bias=None, mask=None):
         self._check_inputs(Q, K, V, bias, mask)
-        q = torch.einsum("bqa,ahc->bqhc", Q, self.q_weights) * self.d_k ** (-0.5)
+        q = torch.einsum("bqa,ahc->bqhc", Q, self.q_weights)
         k = torch.einsum("bka,ahc->bkhc", K, self.k_weights)
         v = torch.einsum("bka,ahc->bkhc", V, self.v_weights)
-        logits = torch.einsum("bqhc,bkhc->bhqk", q, k)
-
-        if bias is not None:
-            logits = logits + bias
-
-        weights = torch.nn.functional.softmax(logits, dim=-1)
-
-        if mask is not None:
-            weights = weights.masked_fill(~mask, 0.0)
-
-        weighted_avg = torch.einsum("bhqk,bkhc->bqhc", weights, v)
+        weighted_avg, _ = _scaled_attention(
+            q, k, v, mask=_normalize_attention_mask(mask, self.n_head), bias=bias
+        )
 
         if self.gate:
             gate_values = torch.einsum("bqa,ahc->bqhc", Q, self.g_weights) + self.g_bias
-            gate_values = torch.sigmoid(gate_values, dim=-1)
+            gate_values = torch.sigmoid(gate_values)
             weighted_avg = weighted_avg * gate_values
 
         output = (
@@ -328,12 +346,20 @@ class Attention(nn.Module):
                 raise ValueError(
                     f"Mask specified but not given by correct dtype, should be torch.bool but found {mask.dtype}"
                 )
-            if mask.dim() != 4:
+            if (mask.dim() != 3) and (mask.dim() != 4):
                 raise ValueError(
-                    f"Mask specified but dimension mismatched: passed {mask.dim()}-dimensional tensor but should be 4-dimensional"
-                    f"of shape (batch_size, n_head, num_queries, num_keys)"
+                    f"Mask specified but dimension mismatched: passed {mask.dim()}-dimensional tensor but should be 3-dimensional"
+                    f" of shape (batch_size, num_queries, num_keys) or 4-dimensional"
+                    f" of shape (batch_size, n_head, num_queries, num_keys)"
                 )
-            batch_size_b, _, num_queries_b, num_keys_b = mask.size()
+            if mask.dim() == 3:
+                batch_size_b, num_queries_b, num_keys_b = mask.size()
+            else:
+                batch_size_b, _, num_queries_b, num_keys_b = mask.size()
+            if batch_size_b != batch_size_q:
+                raise ValueError(
+                    f"Mask specified but batch dimension does not match number of examples given in Q tensor"
+                )
             if (num_queries_b != num_queries) and (num_queries_b != 1):
                 raise ValueError(
                     f"Bias specified but number of queries (dim of axis=2) does not match number of queries given in Q tensor"

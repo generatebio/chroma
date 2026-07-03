@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  quick-tests:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: data-utility
+            path: "tests/data tests/utility"
+          - name: models
+            path: "tests/models"
+          - name: layers
+            path: "tests/layers"
+    name: ${{ matrix.name }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-activate-base: false
+          miniforge-version: latest
+      - name: Create Locked Environment
+        shell: bash -el {0}
+        run: conda create -y -n chroma --file environment.linux-64.lock
+      - name: Install Package
+        shell: bash -el {0}
+        run: conda run -n chroma python -m pip install --no-deps -e .
+      - name: Run Quick Tests
+        shell: bash -el {0}
+        run: conda run -n chroma python -m pytest -q -m "not integration and not slow" ${{ matrix.path }}
+
+  integration:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-activate-base: false
+          miniforge-version: latest
+      - name: Create Locked Environment
+        shell: bash -el {0}
+        run: conda create -y -n chroma --file environment.linux-64.lock
+      - name: Install Package
+        shell: bash -el {0}
+        run: conda run -n chroma python -m pip install --no-deps -e .
+      - name: Run Integration Tests
+        shell: bash -el {0}
+        run: conda run -n chroma python -m pytest -q tests/models/test_chroma.py tests/utility/test_api.py tests/data/test_system.py
+
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: conda-incubator/setup-miniconda@v3
+        with:
+          auto-activate-base: false
+          miniforge-version: latest
+      - name: Create Locked Environment
+        shell: bash -el {0}
+        run: conda create -y -n chroma --file environment.linux-64.lock
+      - name: Install Package
+        shell: bash -el {0}
+        run: conda run -n chroma python -m pip install --no-deps -e .
+      - name: Build Artifacts
+        shell: bash -el {0}
+        run: conda run -n chroma python -m build
+      - name: Check Artifacts
+        shell: bash -el {0}
+        run: conda run -n chroma python -m twine check dist/*
+      - name: Packaging Smoke Test
+        shell: bash -el {0}
+        run: conda run -n chroma python -m pytest -q tests/utility/test_packaging.py

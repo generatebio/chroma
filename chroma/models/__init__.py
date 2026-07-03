@@ -17,4 +17,12 @@ This package contains complete PyTorch models, that is model classes that can
 be trained on data. See also :mod:`chroma.layers`.
 """
 
-from chroma.models.chroma import Chroma
+from importlib import import_module
+
+__all__ = ["Chroma"]
+
+
+def __getattr__(name):
+    if name == "Chroma":
+        return import_module("chroma.models.chroma").Chroma
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")

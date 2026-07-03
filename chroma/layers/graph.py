@@ -154,8 +154,8 @@ class GraphNN(nn.Module):
         return node_h, edge_h
 
     def checkpoint(self, layer, *args):
-        if self.checkpoint_gradients:
-            return checkpoint(layer, *args)
+        if self.checkpoint_gradients and torch.is_grad_enabled():
+            return checkpoint(layer, *args, use_reentrant=False)
         else:
             return layer(*args)
 
@@ -277,9 +277,22 @@ class GraphNN(nn.Module):
             node_h_out = node_h_cache[i + 1]
             edge_h = edge_h_cache[i]
             # Update edge and node
-            node_h_t, edge_h_t = checkpoint(
-                layer.step, t, node_h, node_h_out, edge_h, edge_idx, mask_i, mask_ij
-            )
+            if self.checkpoint_gradients and torch.is_grad_enabled():
+                node_h_t, edge_h_t = checkpoint(
+                    layer.step,
+                    t,
+                    node_h,
+                    node_h_out,
+                    edge_h,
+                    edge_idx,
+                    mask_i,
+                    mask_ij,
+                    use_reentrant=False,
+                )
+            else:
+                node_h_t, edge_h_t = layer.step(
+                    t, node_h, node_h_out, edge_h, edge_idx, mask_i, mask_ij
+                )
 
             # Scatter them in place
             node_h_cache[i + 1].scatter_(

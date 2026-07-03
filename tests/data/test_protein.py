@@ -1,4 +1,5 @@
 import copy
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -6,15 +7,17 @@ import pytest
 
 import chroma
 from chroma.data.protein import Protein
+from chroma.utility.ngl import has_nglview
+from tests.helpers import cif_path
 
 BASE_PATH = str(Path(chroma.__file__).parent.parent)
-PROTEIN_SINGLE_CHAIN = BASE_PATH + "/tests/resources/4kw4.cif"
-PROTEIN_COMPLEX = BASE_PATH + "/tests/resources/3hn3.cif"
+PROTEIN_SINGLE_CHAIN = cif_path("4kw4")
+PROTEIN_COMPLEX = cif_path("3hn3")
 CIF_TRAJECTORY = BASE_PATH + "/tests/resources/chroma_trajectory.cif"
 SEQUENCE = "MSKGEELFTGVVPILVELDGDVNGHKFSVSGEGEGDATYGKLTLKFICTTGKLPVPWPTL"
-PDB_ID = "1B9C"
+PDB_CIF = cif_path("1b9c")
 
-TESTS = [PROTEIN_SINGLE_CHAIN, PROTEIN_COMPLEX, SEQUENCE, PDB_ID]
+TESTS = [PROTEIN_SINGLE_CHAIN, PROTEIN_COMPLEX, SEQUENCE, PDB_CIF]
 
 
 @pytest.mark.parametrize("protein_path", TESTS)
@@ -24,9 +27,7 @@ def test_Protein(protein_path):
         protein = Protein.from_PDB(protein_path)
     elif protein_path.endswith(".cif"):
         protein = Protein.from_CIF(protein_path)
-    elif len(protein_path) == 4:
-        protein = Protein.from_PDBID(protein_path)
-    else:  # Protein Sequence Input
+    else:
         protein = Protein.from_sequence(protein_path)
 
     # Selection Smoke Test
@@ -37,7 +38,8 @@ def test_Protein(protein_path):
     protein.canonicalize()
     protein.sequence()
     len(protein)
-    protein.display()
+    if has_nglview():
+        protein.display()
 
     # Cycles save / load /validate
     X, C, S = protein.to_XCS()
@@ -130,7 +132,18 @@ def test_xcs_trajectory():
     print(protein)
 
     # Display Trajectory
-    protein.display()
+    if has_nglview():
+        protein.display()
+
+
+def test_display_requires_working_nglview():
+    protein = Protein.from_sequence(SEQUENCE)
+
+    if has_nglview():
+        protein.display()
+    else:
+        with pytest.raises(ImportError, match="nglview"):
+            protein.display()
 
 
 def test_trajectory_round_trip():
@@ -154,4 +167,29 @@ def test_trajectory_round_trip():
 
 @pytest.mark.parametrize("pdb_id", ["3bdi", "5sv5"])
 def test_edge_cases(pdb_id):
-    Protein(pdb_id, canonicalize=True)
+    Protein(cif_path(pdb_id), canonicalize=True)
+
+
+def test_local_path_loading_is_explicit_and_pdbid_is_not_inferred():
+    protein = Protein(cif_path("1b9c"))
+    assert len(protein) > 0
+
+    with pytest.raises(NotImplementedError, match="Protein.from_PDBID"):
+        Protein("1B9C")
+
+
+def test_from_pdbid_uses_explicit_download_path(monkeypatch, tmp_path):
+    source = Path(cif_path("1b9c"))
+
+    def _fake_download(pdb_id, ext, local_filename):
+        assert pdb_id.lower() == "1b9c"
+        assert ext == ".cif"
+        shutil.copyfile(source, local_filename)
+
+    monkeypatch.setattr(
+        "chroma.utility.fetchdb.RCSB_file_download",
+        _fake_download,
+    )
+
+    protein = Protein.from_PDBID("1B9C")
+    assert len(protein) > 0
