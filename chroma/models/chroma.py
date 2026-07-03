@@ -24,7 +24,6 @@ from typing import List, Literal, Optional, Tuple, Union
 import torch
 import torch.nn as nn
 
-from chroma.constants import AA20_3
 from chroma.data.protein import Protein
 from chroma.layers.structure.backbone import ProteinBackbone
 from chroma.models import graph_backbone, graph_design
@@ -546,26 +545,6 @@ class Chroma(nn.Module):
         protein.sys.update_with_XCS(X_sample, C=None, S=S_sample)
         return protein
 
-    def _design_ar(self, protein, alphabet=None, temp_S=0.1, temp_chi=1e-3):
-        X, C, S = protein.to_XCS()
-        ban_S = None
-        if alphabet is not None:
-            ban_S = set(AA20_3).difference(alphabet)
-
-        X_sample, S_sample, _, _ = self.design_network_ar.sample(
-            X,
-            C,
-            S,
-            temperature_S=temp_S,
-            temperature_chi=temp_chi,
-            return_scores=True,
-            ban_S=ban_S,
-        )
-
-        protein.sys.update_with_XCS(X_sample, C=None, S=S_sample)
-
-        return protein
-
     def pack(
         self, protein: Protein, temperature_chi: float = 1e-3, clamped: bool = False
     ) -> Protein:
@@ -696,12 +675,14 @@ class Chroma(nn.Module):
 
         # get all the XCS stuff
         Xs, Cs, Ss = zip(
-            *[protein.to_XCS(all_atom=all_atom) for protein in list_of_proteins]
+            *[
+                protein.to_XCS(all_atom=all_atom, device=device)
+                for protein in list_of_proteins
+            ]
         )
 
         # Get Max Dims for Xs, Cs, Ss
         Dmax = max([C.shape[1] for C in Cs])
-        device = Xs[0].device
 
         # Augment each with zeros
         with torch.no_grad():

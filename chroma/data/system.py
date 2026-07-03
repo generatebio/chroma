@@ -293,14 +293,14 @@ class System:
         C = []
         for ch_id, chain in enumerate(self.chains()):
             ch_str = chain.cid
-            if ch_str in list(constants.CHAIN_ALPHABET):
+            if reorder_chain:
+                map_ch_id = ch_id + 1
+            elif ch_str in list(constants.CHAIN_ALPHABET):
                 map_ch_id = list(constants.CHAIN_ALPHABET).index(ch_str)
             else:
                 # fmt: off
                 map_ch_id = np.setdiff1d(np.arange(1, len(constants.CHAIN_ALPHABET)), np.unique(C))[0]
                 # fmt: on
-            if reorder_chain:
-                map_ch_id = ch_id + 1
             C += [map_ch_id] * chain.num_residues()
 
         # Grab full sequence
@@ -327,7 +327,7 @@ class System:
         )
 
         S = []  # Array will contain sequence indices
-        for i in range(num_residues):
+        for i, res in enumerate(self.residues()):
             # If residue should be mask or not
             is_mask = False
 
@@ -339,8 +339,6 @@ class System:
                 if mask_unknown:
                     is_mask = True
 
-            # Get residue from system
-            res = self.get_residue(i)
             if res is None or not res.has_structure():
                 is_mask = True
 
@@ -1513,8 +1511,8 @@ class System:
     @staticmethod
     def from_CIF(input_file: str):
         """Initializes and returns a System object from a CIF file."""
-        f = open(input_file, "r")
-        return System._read_cif(f)[0]
+        with open(input_file, "r") as f:
+            return System._read_cif(f)[0]
 
     @staticmethod
     def _read_cif(f, strict=False):
@@ -1901,15 +1899,15 @@ class System:
         import io
 
         f = io.StringIO(cif_string)
-        sys = System._read_pdb(f, options)
+        sys = System._read_pdb(f, options=options)
         sys.name = "from_string"
         return sys
 
     @staticmethod
     def from_PDB(input_file: str, options=""):
         """Initializes and returns a System object from a PDB file."""
-        f = open(input_file, "r")
-        sys = System._read_pdb(f, options)
+        with open(input_file, "r") as f:
+            sys = System._read_pdb(f, options=options)
         sys.name = input_file
         return sys
 
@@ -2136,8 +2134,8 @@ class System:
 
     def to_CIF(self, output_file: str):
         """Writes the System to a CIF file."""
-        f = open(output_file, "w")
-        self._write_cif(f)
+        with open(output_file, "w") as f:
+            self._write_cif(f)
 
     def to_CIF_string(self):
         """Returns a CIF string representing the System."""
@@ -2367,8 +2365,8 @@ class System:
                 include "CHARMM", "CHARMM19", "CHARMM22", "RENUMBER", "NOEND",
                 "NOTER", and "NOALT". This option is case-insensitive.
         """
-        f = open(output_file, "w")
-        self._write_pdb(f, options)
+        with open(output_file, "w") as f:
+            self._write_pdb(f, options)
 
     def to_PDB_string(self, options=""):
         """Writes the System to a PDB string. The options string has the same
@@ -2723,10 +2721,13 @@ class System:
                     else:
                         if aa == "ARG":
                             A = {an: None for an in ["CD", "NE", "CZ", "NH1", "NH2"]}
+                            atoms = {an: None for an in ["NH1", "NH2"]}
                             for an in A:
                                 atom = residue.find_atom(an)
                                 if atom is not None and atom.num_locations():
                                     A[an] = atom.get_location(0)
+                                    if an in atoms:
+                                        atoms[an] = atom
                             if all([a is not None for n, a in A.items()]):
                                 dihe1 = System.dihedral(
                                     A["CD"], A["NE"], A["CZ"], A["NH1"]
@@ -2735,8 +2736,8 @@ class System:
                                     A["CD"], A["NE"], A["CZ"], A["NH2"]
                                 )
                                 if abs(dihe1) > abs(dihe2):
-                                    A["NH1"].name = "NH2"
-                                    A["NH2"].name = "NH1"
+                                    atoms["NH1"].rename("NH2")
+                                    atoms["NH2"].rename("NH1")
                 elif drop_coors_unknowns:
                     delete_atoms = True
 
@@ -3383,7 +3384,7 @@ class ResidueView(BaseView):
         bb = [None] * (4 if no_hyd else 5)
         left = len(bb)
         for atom in self.atoms():
-            i = System.protein_backbone_atom_type(atom.name, no_hyd)
+            i = System.protein_backbone_atom_type(atom.name, no_hyd, by_name=False)
             if i is None or bb[i] is not None:
                 continue
             bb[i] = atom
@@ -3497,6 +3498,10 @@ class AtomView(BaseView):
     @property
     def name(self):
         return self._siblings["name"][self._ix]
+
+    def rename(self, new_name: str):
+        """Assigns the atom a new name."""
+        self._siblings["name"][self._ix] = new_name
 
     @property
     def het(self):
@@ -3720,7 +3725,7 @@ class AtomLocationView(BaseView):
 
     def defined(self):
         """Return whether this is a valid location."""
-        return (self.x is not None) and (self.y is not None) and (self.z is not None)
+        return not (np.isnan(self.x) or np.isnan(self.y) or np.isnan(self.z))
 
     @property
     def atom(self):

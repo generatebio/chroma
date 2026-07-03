@@ -18,10 +18,7 @@ Utilities to save and load models with metadata.
 
 import os
 import os.path as osp
-import tempfile
-from pathlib import Path
 from urllib.parse import parse_qs, urlparse
-from uuid import uuid4
 
 import torch
 
@@ -41,17 +38,12 @@ def save_model(model, weight_file, metadata=None):
             useful to store `args` representing the CLI args, the date and time
             of training, etc.
     """
+    if weight_file.startswith("s3:"):
+        raise NotImplementedError("Uploading to an s3 link not supported.")
     save_dict = {"init_kwargs": model.kwargs, "model_state_dict": model.state_dict()}
     if metadata is not None:
         save_dict.update(metadata)
-    local_path = str(
-        Path(tempfile.gettempdir(), str(uuid4())[:8])
-        if weight_file.startswith("s3:")
-        else weight_file
-    )
-    torch.save(save_dict, local_path)
-    if weight_file.startswith("s3:"):
-        raise NotImplementedError("Uploading to an s3 link not supported.")
+    torch.save(save_dict, weight_file)
 
 
 def load_model(

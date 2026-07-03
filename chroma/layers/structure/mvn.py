@@ -567,6 +567,8 @@ class ConditionalBackboneMVNGlobular(BackboneMVNGlobular):
 
         R_clamp_inverse = torch.linalg.pinv(self.R_clamp)
         self.register_buffer("R_clamp_inverse", R_clamp_inverse)
+        RRt_clamp_inverse = torch.linalg.pinv(self.RRt_clamp)
+        self.register_buffer("RRt_clamp_inverse", RRt_clamp_inverse)
         self.register_buffer("mu_sample", self.mu(X))
 
     def _center_of_mass(self, X, C):

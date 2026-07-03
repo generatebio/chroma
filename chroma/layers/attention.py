@@ -258,7 +258,7 @@ class Attention(nn.Module):
 
     def forward(self, Q, K, V, bias=None, mask=None):
         self._check_inputs(Q, K, V, bias, mask)
-        q = torch.einsum("bqa,ahc->bqhc", Q, self.q_weights) * self.d_k ** (-0.5)
+        q = torch.einsum("bqa,ahc->bqhc", Q, self.q_weights)
         k = torch.einsum("bka,ahc->bkhc", K, self.k_weights)
         v = torch.einsum("bka,ahc->bkhc", V, self.v_weights)
         weighted_avg, _ = _scaled_attention(
@@ -267,7 +267,7 @@ class Attention(nn.Module):
 
         if self.gate:
             gate_values = torch.einsum("bqa,ahc->bqhc", Q, self.g_weights) + self.g_bias
-            gate_values = torch.sigmoid(gate_values, dim=-1)
+            gate_values = torch.sigmoid(gate_values)
             weighted_avg = weighted_avg * gate_values
 
         output = (

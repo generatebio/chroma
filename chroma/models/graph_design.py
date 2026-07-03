@@ -502,7 +502,7 @@ class GraphDesign(nn.Module):
                 X_noise, C, S, node_h, edge_h, edge_idx, mask_i, mask_ij, permute_idx
             )
         else:
-            logp_S = (None,)
+            logp_S = None
             logp_chi = None
             chi = None
             mask_chi = None
@@ -715,9 +715,13 @@ class GraphDesign(nn.Module):
                 m.sum(dim=tuple(range(1, l.dim()))) + self.loss_eps
             )
         mask_S = o["mask_i"]
-        neglogp_S = -_avg(mask_S, o["logp_S"])
         neglogp_chi = -_avg(o["mask_chi"], o["logp_chi"])
-        neglogp = neglogp_S + neglogp_chi
+        if o["logp_S"] is not None:
+            neglogp_S = -_avg(mask_S, o["logp_S"])
+            neglogp = neglogp_S + neglogp_chi
+        else:
+            neglogp_S = None
+            neglogp = neglogp_chi
         if o["logp_S_marginals"] is not None:
             neglogp_S_marginals = -_avg(mask_S, o["logp_S_marginals"])
             neglogp = neglogp + neglogp_S_marginals

@@ -399,8 +399,11 @@ class ProteinCaption(nn.Module):
             Xe, _, _, Me, _ = self.protein_encoder.to(X.device)(X, C, node_h_aux=node_h)
         else:
             # TODO: is there a better way to deal with sequence padding tokens when batch size > 1?
-            if O is not None and O[:, :, -1].any():
-                O = None
+            if O is not None:
+                pad_token_present = O[:, :, -1].any(dim=1)
+                if pad_token_present.any():
+                    O = O.clone()
+                    O[pad_token_present] = 0
             Xe0, _, _, Me, _ = self.protein_encoder.to(X.device).encode(X, C, O, t)
             Xe = self.protein_encoder_linear.to(X.device)(Xe0)
 
@@ -644,7 +647,7 @@ class ProteinCaption(nn.Module):
                                 "Problem: tried to switch encodings at positions 0 and"
                                 f" {first_cid}, but failed!"
                             )
-                            # raise
+                            raise
 
             pooled_encoding.append(torch.cat(batch_encoding))
 
