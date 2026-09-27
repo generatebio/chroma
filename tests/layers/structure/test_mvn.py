@@ -175,3 +175,106 @@ def test_cmvn(noise):
         X_sample = cmvn.sample()
         _, rmsd = aligner.align(X, X_sample, protein.get_mask("namesel clamp"))
         assert rmsd.item() < 1e-1
+
+
+# Chain center-of-mass translational scaling (xi), Supplementary Appendix D.3.3-D.3.4.
+#
+# xi sets each chain's center-of-mass (COM) standard deviation, per xyz dimension, to a
+# target: unity under monomer scaling, sigma_COM under complex scaling. The constants below
+# mirror `BackboneMVNGlobular` but are written out deliberately, so that the targets these
+# tests check against are recomputed independently of the module under test.
+XI_A = 1.5587407701549267  # segment scale `a`, in Angstrom
+XI_NU = 2.0 / 5.0  # Rg scaling exponent
+XI_RG0 = 2.0 / 3.0  # Rg prefactor `r`, per xyz dimension
+
+# (residues per chain, complex_scaling)
+XI_CASES = [
+    ([50], False),
+    ([100], True),
+    ([50, 50], True),
+    ([30, 70], True),
+    ([100, 100], True),
+]
+
+
+def _chain_com_stds(chain_lengths, complex_scaling, exact_translation_scaling):
+    """Measure each chain's COM std from the exact covariance `Sigma = R R^t`.
+
+    Column `j` of `R` is `R e_j`, so pushing the identity through `sample` builds `R`
+    exactly, with no sampling noise. `R` acts identically on x, y and z, so one
+    dimension suffices.
+    """
+    mvn = BackboneMVNGlobular(
+        covariance_model="globular",
+        complex_scaling=complex_scaling,
+        exact_translation_scaling=exact_translation_scaling,
+    )
+    C = torch.cat(
+        [torch.full((n,), i + 1.0) for i, n in enumerate(chain_lengths)]
+    ).unsqueeze(0)
+    num_atoms = 4 * C.shape[1]
+
+    Z = torch.zeros(num_atoms, num_atoms, 3)
+    Z[torch.arange(num_atoms), torch.arange(num_atoms), 0] = 1.0
+    R = mvn.sample(C.expand(num_atoms, -1), Z=Z).reshape(num_atoms, num_atoms, 3)
+    R = R[..., 0].t().double()
+    RRt = R @ R.t()
+
+    # Each chain's COM is w^t x for a uniform weight vector, so its variance is w^t Sigma w
+    stds, start = [], 0
+    for num_chain_residues in chain_lengths:
+        num_chain_atoms = 4 * num_chain_residues
+        w = torch.zeros(num_atoms, dtype=torch.float64)
+        w[start : start + num_chain_atoms] = 1.0 / num_chain_atoms
+        stds.append(torch.sqrt(w @ RRt @ w).item())
+        start += num_chain_atoms
+    return np.array(stds)
+
+
+def _target_com_std(chain_lengths, complex_scaling):
+    """The COM std that xi is meant to enforce (Supplementary Appendix D.3.4)."""
+    if not complex_scaling:
+        return 1.0
+    N = 4.0 * np.array(chain_lengths, dtype=float)
+    num_chains, N_total = len(N), N.sum()
+    Rg2_centers_of_mass = max(
+        XI_RG0 ** 2 * N_total ** (2 * XI_NU)
+        - XI_RG0 ** 2 / N_total * (N ** (2 * XI_NU + 1)).sum(),
+        1.0,
+    )
+    std_correction = np.sqrt(num_chains / max(num_chains - 1, 1))
+    return std_correction * np.sqrt(Rg2_centers_of_mass)
+
+
+def _dropped_factor(num_residues):
+    """`a * sqrt(S_N / N^2)`, the uncentered COM std of a chain in units of `x_init_std`.
+
+    The default xi implicitly treats this factor as 1, i.e. it uses the unitless per-atom
+    stationary std in place of the chain's COM std.
+    """
+    N = 4.0 * num_residues
+    b = 3 / N + N ** -XI_NU * np.sqrt(
+        N ** (2 * (XI_NU - 1)) * (N ** 2 + 9) - (XI_A / XI_RG0) ** 2
+    )
+    # S_N = sum_ij b^|i-j| for the stationary AR(1) chain
+    S_over_N2 = (N * (1 + b) / (1 - b) - 2 * b * (1 - b ** N) / (1 - b) ** 2) / N ** 2
+    return XI_A * np.sqrt(S_over_N2)
+
+
+@pytest.mark.parametrize("chain_lengths,complex_scaling", XI_CASES)
+def test_exact_translation_scaling_hits_target_com_std(chain_lengths, complex_scaling):
+    """With `exact_translation_scaling`, chain COM std matches the D.3.4 target."""
+    stds = _chain_com_stds(chain_lengths, complex_scaling, True)
+    ratios = stds / _target_com_std(chain_lengths, complex_scaling)
+    assert np.allclose(ratios, 1.0, rtol=1e-3), ratios
+
+
+@pytest.mark.parametrize("chain_lengths,complex_scaling", XI_CASES)
+def test_default_translation_scaling_misses_target(chain_lengths, complex_scaling):
+    """The default xi falls short of the D.3.4 target by exactly `a * sqrt(S_N / N^2)`."""
+    stds = _chain_com_stds(chain_lengths, complex_scaling, False)
+    ratios = stds / _target_com_std(chain_lengths, complex_scaling)
+    expected = np.array([_dropped_factor(n) for n in chain_lengths])
+
+    assert np.allclose(ratios, expected, rtol=1e-3), (ratios, expected)
+    assert (ratios < 0.95).all(), ratios
