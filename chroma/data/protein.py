@@ -227,15 +227,16 @@ class Protein:
         Returns:
             Protein: An instance of the Protein class initialized from the fetched CIF file corresponding to the PDBID.
         """
-        from os import unlink
-
         from chroma.utility.fetchdb import RCSB_file_download
 
-        file_cif = os.path.join(tempfile.gettempdir(), f"{pdb_id}.cif")
-        RCSB_file_download(pdb_id, ".cif", file_cif)
-        protein = cls.from_CIF(file_cif, canonicalize=canonicalize, device=device)
-        unlink(file_cif)
-        return protein
+        # Download into a process-unique directory. A fixed name in the system temp
+        # directory is shared by every process on the machine, so two concurrent
+        # fetches of the same entry race: one unlinks the file while the other is
+        # still reading it, or reads it half-written.
+        with tempfile.TemporaryDirectory() as temp_dir:
+            file_cif = os.path.join(temp_dir, f"{pdb_id}.cif")
+            RCSB_file_download(pdb_id, ".cif", file_cif)
+            return cls.from_CIF(file_cif, canonicalize=canonicalize, device=device)
 
     @classmethod
     def from_sequence(
