@@ -40,6 +40,7 @@ class BackboneMVNGlobular(torch.nn.Module):
         covariance_model="brownian",
         complex_scaling=False,
         sigma_translation=1.0,
+        exact_translation_scaling=False,
         **kwargs,
     ):
         super().__init__()
@@ -62,6 +63,8 @@ class BackboneMVNGlobular(torch.nn.Module):
         self.covariance_model = covariance_model
         self.complex_scaling = complex_scaling
         self.sigma_translation = sigma_translation
+        # [yp1065] True: xi hits the target chain-COM std exactly (see _globular_parameters)
+        self.exact_translation_scaling = exact_translation_scaling
 
     def _atomic_mean(self, X_flat, mask):
         """Compute the mean across all 4 atom types by mask expansion"""
@@ -106,6 +109,7 @@ class BackboneMVNGlobular(torch.nn.Module):
         B = torch.clip(B, 1e-4, 1.0 - 1e-4)
 
         # OU process equilibrium standard deviation warm-starts process
+        # [yp1065] unitless: per-atom std in units of a (applied later), not Angstrom
         x_init_std = torch.sqrt(1.0 / (1.0 - B ** 2))
 
         # Compute size-weighted average Rg^2 per chain
@@ -116,11 +120,11 @@ class BackboneMVNGlobular(torch.nn.Module):
         # Mean scaling parameter deflates equilibrium variance to unity and
         # optionally re-inflates the per center of mass variance to implement
         # complex scaling
+        # [yp1065] mean_shift_scale = xi of SI D.3.3-5; R_center scales chain COM by 1 - xi.
         if translation_inflation is not None:
             # This argument overrides default per-chain translational scaling
             # to [translation_inflation * Complex Rg]
-            marginal_COM_std = translation_inflation * Rg2_complex.sqrt()
-            mean_shift_scale = (x_init_std - marginal_COM_std[..., None]) / (x_init_std)
+            target_COM_std = (translation_inflation * Rg2_complex.sqrt())[..., None]
         elif self.complex_scaling:
             N_chains_per_complex = (C_mask.sum(1) > 0).sum(1)
             # Correct for the fact that we are sampling chains IID (not
@@ -128,10 +132,26 @@ class BackboneMVNGlobular(torch.nn.Module):
             std_correction = torch.sqrt(
                 N_chains_per_complex / (N_chains_per_complex - 1).clamp(min=1)
             )
-            marginal_COM_std = std_correction * Rg_centers_of_mass
-            mean_shift_scale = (x_init_std - marginal_COM_std[..., None]) / (x_init_std)
+            target_COM_std = (std_correction * Rg_centers_of_mass)[..., None]
         else:
-            mean_shift_scale = (x_init_std - 1.0) / (x_init_std)
+            target_COM_std = 1.0
+
+        if self.exact_translation_scaling:
+            # [yp1065] 1 - xi = target / COM std of the uncentered chain, which is
+            # a * x_init_std * sqrt(S_N/N^2), S_N = sum_ij B^|i-j| (stationary AR(1)).
+            # float64: (1-B)^-2 terms cancel badly near the B clip; N=1 gives S_N/N^2 = 1.
+            N64, B64 = N_per_chain.double(), B.double()
+            S_over_N2 = (
+                N64 * (1 + B64) / (1 - B64)
+                - 2 * B64 * (1 - B64 ** N64) / (1 - B64) ** 2
+            ) / N64 ** 2
+            S_over_N2 = torch.where(N64 > 1, S_over_N2, torch.ones_like(S_over_N2))
+            COM_std = a * x_init_std * torch.sqrt(S_over_N2).to(B.dtype)
+            mean_shift_scale = 1.0 - target_COM_std / COM_std
+        else:
+            # [yp1065] Original: uses x_init_std (unitless) as the COM std, i.e. drops
+            # a * sqrt(S_N/N^2) = 0.88-0.62 for 50-1000 res chains -> COM std that much short.
+            mean_shift_scale = (x_init_std - target_COM_std) / (x_init_std)
 
         return B[..., None], x_init_std[..., None], mean_shift_scale[..., None]
 
@@ -457,6 +477,7 @@ class BackboneMVNGlobular(torch.nn.Module):
         xi = xi[..., 0]
 
         # Compute determinants per chain
+        # [yp1065] SI D.3.6; valid for either xi (only log(1 - xi) changes -> ELBO constant)
         N_chain = C_mask_all.sum([1, 3])
         logdet_chain = (
             N_chain * np.log(a) + torch.log(1.0 - xi) - 0.5 * torch.log(1.0 - B ** 2)

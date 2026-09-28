@@ -27,9 +27,31 @@ def cif_file():
     return file
 
 
-def download_file(url, destination_file):
-    r = requests.get(url, allow_redirects=True)
-    open(destination_file, "wb").write(r.content)
+def download_file(url, destination_file, attempts=3):
+    """Download `url` to `destination_file`, retrying transient server errors.
+
+    The response status has to be checked: on an error the body is an error page,
+    and writing it out unchecked hands the parsers garbage that surfaces later as
+    an unrelated-looking parse failure.
+    """
+    for attempt in range(attempts):
+        try:
+            r = requests.get(url, allow_redirects=True, timeout=60)
+            r.raise_for_status()
+        except requests.HTTPError:
+            # A client error is a fact about the resource, not a transient fault
+            if r.status_code < 500 or attempt == attempts - 1:
+                raise
+            time.sleep(2 ** attempt)
+            continue
+        except requests.RequestException:
+            if attempt == attempts - 1:
+                raise
+            time.sleep(2 ** attempt)
+            continue
+        with open(destination_file, "wb") as f:
+            f.write(r.content)
+        return
 
 
 def test_7bz5_selection(cif_file):
@@ -168,27 +190,41 @@ def test_invalid_input(cif_file):
 
 
 def next_structure_file(num=100, cif=True):
-    tmp_file = os.path.join(tempfile.gettempdir(), "_pdb_list.txt")
-    download_file(
-        "https://files.wwpdb.org/pub/pdb/derived_data/pdb_entry_type.txt", tmp_file
-    )
-    D = pandas.read_csv(tmp_file, sep="\t", header=None)
-    pdb_ids = list(D[0])
-    random.shuffle(pdb_ids)
+    """Yield freshly downloaded structure files, one entry at a time.
 
-    if cif:
-        file = os.path.join(tempfile.gettempdir(), "_pdb_download.cif")
-    else:
-        file = os.path.join(tempfile.gettempdir(), "_pdb_download.pdb")
-    for pdb_id in pdb_ids[:num]:
-        # download CIF file
-        if cif:
-            file = os.path.join(tempfile.gettempdir(), "_pdb_download.cif")
-            download_file(f"https://files.rcsb.org/download/{pdb_id}.cif", file)
-        else:
-            file = os.path.join(tempfile.gettempdir(), "_pdb_download.pdb")
-            download_file(f"https://files.rcsb.org/download/{pdb_id}.pdb", file)
-        yield pdb_id, file
+    Everything lands in a process-unique directory. Fixed names under the system
+    temp directory are shared by every test process on the machine, so two runs
+    overwrite each other's download mid-read and the reader sees a truncated or
+    doubled file.
+    """
+    suffix = ".cif" if cif else ".pdb"
+    with tempfile.TemporaryDirectory() as temp_dir:
+        list_file = os.path.join(temp_dir, "pdb_list.txt")
+        download_file(
+            "https://files.wwpdb.org/pub/pdb/derived_data/pdb_entry_type.txt", list_file
+        )
+        D = pandas.read_csv(list_file, sep="\t", header=None)
+        pdb_ids = list(D[0])
+        random.shuffle(pdb_ids)
+
+        file = os.path.join(temp_dir, f"pdb_download{suffix}")
+        yielded = 0
+        for pdb_id in pdb_ids:
+            if yielded == num:
+                return
+            try:
+                download_file(
+                    f"https://files.rcsb.org/download/{pdb_id}{suffix}", file
+                )
+            except requests.HTTPError as error:
+                # Not every entry is distributed in every format: structures too
+                # large for the legacy PDB format are CIF-only and RCSB answers
+                # 404. Draw a replacement rather than failing the smoke test.
+                if error.response is not None and error.response.status_code == 404:
+                    continue
+                raise
+            yielded += 1
+            yield pdb_id, file
 
 
 def test_writing_pdb(cif_file):
